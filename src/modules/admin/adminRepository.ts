@@ -50,7 +50,21 @@ export type SubmissionDetail = SubmissionListItem & {
   scaleScore: number
   source: string
 }
-export type SubmissionFullItem = Omit<SubmissionDetail, 'overallScore' | 'scaleScore' | 'source'>
+export type SubmissionFullItem = Pick<
+  SubmissionListItem,
+  | 'answersCount'
+  | 'email'
+  | 'fullName'
+  | 'id'
+  | 'part1Completed'
+  | 'part2Completed'
+  | 'roundtableRegistered'
+  | 'statusNote'
+  | 'submittedAt'
+> & {
+  answers: SubmissionDetail['answers']
+  roundtableRegistration: SubmissionDetail['roundtableRegistration']
+}
 
 export type SubmissionDetailListFilters = {
   limit: number
@@ -391,25 +405,32 @@ export class PgAdminRepository {
     return {
       items: rows.map((row) => {
         const listItem = mapListItem(row)
-        const listItemWithoutScores: Omit<SubmissionListItem, 'overallScore' | 'scaleScore'> = {
+        const listItemForFullResponse: Pick<
+          SubmissionListItem,
+          | 'answersCount'
+          | 'email'
+          | 'fullName'
+          | 'id'
+          | 'part1Completed'
+          | 'part2Completed'
+          | 'roundtableRegistered'
+          | 'statusNote'
+          | 'submittedAt'
+        > = {
           answersCount: listItem.answersCount,
           email: listItem.email,
           fullName: listItem.fullName,
           id: listItem.id,
           part1Completed: listItem.part1Completed,
           part2Completed: listItem.part2Completed,
-          position: listItem.position,
-          privacyConsent: listItem.privacyConsent,
-          report: listItem.report,
           roundtableRegistered: listItem.roundtableRegistered,
           statusNote: listItem.statusNote,
           submittedAt: listItem.submittedAt,
-          submissionStatus: listItem.submissionStatus,
         }
         const roundtable = roundtableBySubmission.get(row.id)
 
         return {
-          ...listItemWithoutScores,
+          ...listItemForFullResponse,
           answers: (answersBySubmission.get(row.id) ?? []).map((answer) => ({
             answerText: answer.answer_text,
             answerValue: answer.answer_value,
@@ -419,8 +440,6 @@ export class PgAdminRepository {
             questionText: answer.question_text,
             questionType: answer.question_type,
           })),
-          clientMeta: row.client_meta,
-          domainScores: row.domain_scores,
           roundtableRegistration: roundtable
             ? {
                 email: roundtable.email,
