@@ -4,6 +4,8 @@ set -Eeuo pipefail
 export PATH="${HOME}/.local/bin:${HOME}/.local/node/bin:${PATH}"
 
 platform_root="${CWI_PLATFORM_ROOT:-${HOME}/cwi-platform/repos}"
+export CWI_NODE_ENV="${CWI_NODE_ENV:-production}"
+export CWI_PUBLIC_ORIGIN="${CWI_PUBLIC_ORIGIN:-https://ceo-workforce-index.com}"
 mkdir -p "${platform_root}"
 
 clone_or_pull() {
@@ -58,7 +60,10 @@ fi
 
 pm2 delete cwi-backend >/dev/null 2>&1 || true
 pm2 delete cwi-public >/dev/null 2>&1 || true
-CWI_PLATFORM_ROOT="${platform_root}" pm2 start \
+CWI_PLATFORM_ROOT="${platform_root}" \
+CWI_NODE_ENV="${CWI_NODE_ENV}" \
+CWI_PUBLIC_ORIGIN="${CWI_PUBLIC_ORIGIN}" \
+pm2 start \
   "${platform_root}/cwi-backend/deploy/ecosystem.config.cjs" \
   --update-env
 pm2 save
