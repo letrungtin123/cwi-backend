@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { HttpError } from '../src/http/errors.js'
 import { buildAnonymousReportPayload } from '../src/modules/reports/anonymousReportPayload.js'
+import { normalizeRoundtableRegistration } from '../src/modules/roundtable/roundtableValidation.js'
 import { buildReportObjectPaths } from '../src/modules/reports/reportAssetStorage.js'
 import { buildReportJobRequest } from '../src/modules/reports/reportPayload.js'
 import { normalizeSurveySubmission } from '../src/modules/survey/submissionValidation.js'
@@ -96,6 +97,8 @@ describe('normalizeSurveySubmission', () => {
     expect(submission.roundtableRegistration).toEqual({
       email: 'roundtable@company.com',
       fullName: 'Nguyễn Văn An',
+      id: null,
+      position: null,
       registered: true,
     })
     expect(submission.statusNote).toContain('Đồng ý')
@@ -137,6 +140,29 @@ describe('normalizeSurveySubmission', () => {
     ).toThrow(HttpError)
   })
 })
+
+describe('normalizeRoundtableRegistration', () => {
+  it('normalizes standalone roundtable registration payloads', () => {
+    const registration = normalizeRoundtableRegistration(
+      {
+        clientMeta: { path: '/survey' },
+        email: 'CEO@Company.com',
+        fullName: '  Nguyễn   Văn An  ',
+        position: ' CEO / Tổng Giám đốc ',
+        surveySubmissionIdempotencyKey: 'source4:survey-key-1',
+      },
+      'roundtable-key-1',
+    )
+
+    expect(registration.email).toBe('ceo@company.com')
+    expect(registration.fullName).toBe('Nguyễn Văn An')
+    expect(registration.idempotencyKey).toBe('roundtable-key-1')
+    expect(registration.position).toBe('CEO / Tổng Giám đốc')
+    expect(registration.surveySubmissionIdempotencyKey).toBe('source4:survey-key-1')
+    expect(registration.payloadHash).toMatch(/^[a-f0-9]{64}$/)
+  })
+})
+
 describe('buildReportObjectPaths', () => {
   it('builds stable private storage paths without participant identifiers', () => {
     const paths = buildReportObjectPaths({

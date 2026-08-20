@@ -45,6 +45,8 @@ export type SubmissionDetail = SubmissionListItem & {
   roundtableRegistration: {
     email: string
     fullName: string
+    id: string
+    position: string | null
     registeredAt: string
   } | null
   scaleScore: number
@@ -116,10 +118,12 @@ type AnswerRow = {
 }
 
 type RoundtableRow = {
-  submission_id: string
   email: string
   full_name: string
+  id: string
+  position: string | null
   registered_at: Date
+  submission_id: string
 }
 
 export type SubmissionListFilters = {
@@ -140,6 +144,51 @@ export type SubmissionStats = {
   totalSubmissions: number
 }
 
+export type RoundtableLinkStatus = 'linked' | 'standalone'
+
+export type RoundtableSubmissionSummary = {
+  answersCount: number
+  email: string
+  fullName: string
+  id: string
+  position: string
+  privacyConsent: string
+  report: ReportSummary
+  statusNote: string
+  submittedAt: string
+  submissionStatus: string
+}
+
+export type RoundtableRegistrationListItem = {
+  email: string
+  fullName: string
+  id: string
+  linkedSubmission: RoundtableSubmissionSummary | null
+  position: string | null
+  registeredAt: string
+  source: string
+}
+
+export type RoundtableRegistrationDetail = RoundtableRegistrationListItem & {
+  clientMeta: Record<string, unknown>
+  surveySubmissionIdempotencyKey: string | null
+  userAgent: string | null
+}
+
+export type RoundtableRegistrationFilters = {
+  before: Date | null
+  limit: number
+  linkStatus: RoundtableLinkStatus | null
+  search: string | null
+}
+
+export type RoundtableRegistrationStats = {
+  linkedSubmissions: number
+  standaloneRegistrations: number
+  todayRegistrations: number
+  totalRegistrations: number
+}
+
 type StatsRow = {
   average_overall_score: string | null
   average_scale_score: string | null
@@ -148,6 +197,39 @@ type StatsRow = {
   part2_refused_privacy: string
   roundtable_registered: string
   total_submissions: string
+}
+
+type RoundtableRegistrationRow = {
+  client_meta: Record<string, unknown>
+  email: string
+  full_name: string
+  id: string
+  position: string | null
+  registered_at: Date
+  report_job_id: string | null
+  report_last_error_message: string | null
+  report_pdf_storage_path: string | null
+  report_status: string | null
+  report_updated_at: Date | null
+  source: string
+  submission_answers_count: number | null
+  submission_email: string | null
+  submission_full_name: string | null
+  submission_id: string | null
+  submission_position: string | null
+  submission_privacy_consent: string | null
+  submission_status: string | null
+  submission_status_note: string | null
+  submission_submitted_at: Date | null
+  survey_submission_idempotency_key: string | null
+  user_agent: string | null
+}
+
+type RoundtableStatsRow = {
+  linked_submissions: string
+  standalone_registrations: string
+  today_registrations: string
+  total_registrations: string
 }
 
 const submissionSelect = `
@@ -175,6 +257,42 @@ const submissionSelect = `
     report.pdf_storage_path AS report_pdf_storage_path,
     COALESCE(report.last_error_message, report.error_message) AS report_last_error_message
   FROM public.cwi_survey_submissions AS s
+  LEFT JOIN LATERAL (
+    SELECT id, status, updated_at, pdf_storage_path, last_error_message, error_message
+    FROM public.cwi_report_jobs
+    WHERE submission_id = s.id
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  ) AS report ON true
+`
+
+const roundtableSelect = `
+  SELECT
+    r.id,
+    r.full_name,
+    r.email,
+    r.position,
+    r.registered_at,
+    r.source,
+    r.client_meta,
+    r.user_agent,
+    r.survey_submission_idempotency_key,
+    s.id AS submission_id,
+    s.full_name AS submission_full_name,
+    s.email AS submission_email,
+    s.position AS submission_position,
+    s.submission_status,
+    s.status_note AS submission_status_note,
+    s.privacy_consent AS submission_privacy_consent,
+    s.answers_count AS submission_answers_count,
+    s.submitted_at AS submission_submitted_at,
+    report.id AS report_job_id,
+    report.status AS report_status,
+    report.updated_at AS report_updated_at,
+    report.pdf_storage_path AS report_pdf_storage_path,
+    COALESCE(report.last_error_message, report.error_message) AS report_last_error_message
+  FROM public.cwi_roundtable_registrations AS r
+  LEFT JOIN public.cwi_survey_submissions AS s ON s.id = r.submission_id
   LEFT JOIN LATERAL (
     SELECT id, status, updated_at, pdf_storage_path, last_error_message, error_message
     FROM public.cwi_report_jobs
@@ -269,6 +387,105 @@ function mapListItem(row: SubmissionRow): SubmissionListItem {
   }
 }
 
+function mapRoundtableReportSummary(row: RoundtableRegistrationRow): ReportSummary {
+  if (!row.report_job_id) {
+    return {
+      errorMessage: null,
+      jobId: null,
+      label: 'Chưa tạo báo cáo',
+      pdfAvailable: false,
+      pdfDownloadUrl: null,
+      status: 'not_started',
+      updatedAt: null,
+    }
+  }
+
+  if (row.report_status === 'completed') {
+    const pdfAvailable = Boolean(row.report_pdf_storage_path)
+    return {
+      errorMessage: null,
+      jobId: row.report_job_id,
+      label: pdfAvailable ? 'Đã tạo báo cáo' : 'Đã tạo, thiếu PDF',
+      pdfAvailable,
+      pdfDownloadUrl: pdfAvailable ? `/api/v1/admin/report-jobs/${row.report_job_id}/pdf` : null,
+      status: 'completed',
+      updatedAt: row.report_updated_at ? toIso(row.report_updated_at) : null,
+    }
+  }
+
+  if (row.report_status === 'failed') {
+    return {
+      errorMessage: row.report_last_error_message,
+      jobId: row.report_job_id,
+      label: 'Tạo báo cáo lỗi',
+      pdfAvailable: false,
+      pdfDownloadUrl: null,
+      status: 'failed',
+      updatedAt: row.report_updated_at ? toIso(row.report_updated_at) : null,
+    }
+  }
+
+  if (row.report_status === 'skipped') {
+    return {
+      errorMessage: row.report_last_error_message,
+      jobId: row.report_job_id,
+      label: 'Không tạo báo cáo',
+      pdfAvailable: false,
+      pdfDownloadUrl: null,
+      status: 'skipped',
+      updatedAt: row.report_updated_at ? toIso(row.report_updated_at) : null,
+    }
+  }
+
+  return {
+    errorMessage: row.report_last_error_message,
+    jobId: row.report_job_id,
+    label: 'Đang tạo báo cáo',
+    pdfAvailable: false,
+    pdfDownloadUrl: null,
+    status: 'generating',
+    updatedAt: row.report_updated_at ? toIso(row.report_updated_at) : null,
+  }
+}
+
+function mapRoundtableLinkedSubmission(row: RoundtableRegistrationRow): RoundtableSubmissionSummary | null {
+  if (!row.submission_id || !row.submission_submitted_at) return null
+
+  return {
+    answersCount: row.submission_answers_count ?? 0,
+    email: row.submission_email ?? '',
+    fullName: row.submission_full_name ?? '',
+    id: row.submission_id,
+    position: row.submission_position ?? '',
+    privacyConsent: row.submission_privacy_consent ?? '',
+    report: mapRoundtableReportSummary(row),
+    statusNote: row.submission_status_note ?? '',
+    submittedAt: toIso(row.submission_submitted_at),
+    submissionStatus: row.submission_status ?? '',
+  }
+}
+
+function mapRoundtableRegistration(row: RoundtableRegistrationRow): RoundtableRegistrationListItem {
+  return {
+    email: row.email,
+    fullName: row.full_name,
+    id: row.id,
+    linkedSubmission: mapRoundtableLinkedSubmission(row),
+    position: row.position,
+    registeredAt: toIso(row.registered_at),
+    source: row.source,
+  }
+}
+
+function mapRoundtableRegistrationDetail(row: RoundtableRegistrationRow): RoundtableRegistrationDetail {
+  return {
+    ...mapRoundtableRegistration(row),
+    clientMeta: row.client_meta,
+    surveySubmissionIdempotencyKey: row.survey_submission_idempotency_key,
+    userAgent: row.user_agent,
+  }
+}
+
 function toNumber(value: string | null) {
   if (value === null) return 0
   const parsed = Number(value)
@@ -277,6 +494,81 @@ function toNumber(value: string | null) {
 
 export class PgAdminRepository {
   constructor(private readonly pool: pg.Pool) {}
+
+  async listRoundtableRegistrations(filters: RoundtableRegistrationFilters): Promise<RoundtableRegistrationListItem[]> {
+    const params: unknown[] = [filters.before]
+    const where = ['($1::timestamptz IS NULL OR r.registered_at < $1::timestamptz)']
+
+    if (filters.linkStatus === 'linked') {
+      where.push('r.submission_id IS NOT NULL')
+    } else if (filters.linkStatus === 'standalone') {
+      where.push('r.submission_id IS NULL')
+    }
+
+    if (filters.search) {
+      params.push(`%${filters.search}%`)
+      where.push(
+        `(r.full_name ILIKE $${params.length}
+          OR r.email ILIKE $${params.length}
+          OR r.position ILIKE $${params.length}
+          OR s.full_name ILIKE $${params.length}
+          OR s.email ILIKE $${params.length}
+          OR s.position ILIKE $${params.length})`,
+      )
+    }
+
+    params.push(filters.limit)
+    const result = await this.pool.query<RoundtableRegistrationRow>(
+      `
+      ${roundtableSelect}
+      WHERE ${where.join(' AND ')}
+      ORDER BY r.registered_at DESC, r.id DESC
+      LIMIT $${params.length}
+      `,
+      params,
+    )
+
+    return result.rows.map(mapRoundtableRegistration)
+  }
+
+  async getRoundtableRegistrationStats(): Promise<RoundtableRegistrationStats> {
+    const result = await this.pool.query<RoundtableStatsRow>(
+      `
+      SELECT
+        count(*)::text AS total_registrations,
+        count(*) FILTER (WHERE submission_id IS NOT NULL)::text AS linked_submissions,
+        count(*) FILTER (WHERE submission_id IS NULL)::text AS standalone_registrations,
+        count(*) FILTER (WHERE registered_at >= date_trunc('day', now()))::text AS today_registrations
+      FROM public.cwi_roundtable_registrations
+      `,
+    )
+
+    const row = result.rows[0]
+    return {
+      linkedSubmissions: toNumber(row?.linked_submissions ?? null),
+      standaloneRegistrations: toNumber(row?.standalone_registrations ?? null),
+      todayRegistrations: toNumber(row?.today_registrations ?? null),
+      totalRegistrations: toNumber(row?.total_registrations ?? null),
+    }
+  }
+
+  async getRoundtableRegistration(id: string): Promise<RoundtableRegistrationDetail> {
+    const result = await this.pool.query<RoundtableRegistrationRow>(
+      `
+      ${roundtableSelect}
+      WHERE r.id = $1
+      LIMIT 1
+      `,
+      [id],
+    )
+
+    const row = result.rows[0]
+    if (!row) {
+      throw new HttpError(404, 'roundtable_registration_not_found', 'Roundtable registration was not found.')
+    }
+
+    return mapRoundtableRegistrationDetail(row)
+  }
 
   async listSubmissions(filters: SubmissionListFilters): Promise<SubmissionListItem[]> {
     const params: unknown[] = [filters.before]
@@ -386,7 +678,7 @@ export class PgAdminRepository {
         [submissionIds],
       ),
       this.pool.query<RoundtableRow>(
-        'SELECT submission_id, full_name, email, registered_at ' +
+        'SELECT id, submission_id, full_name, email, position, registered_at ' +
           'FROM public.cwi_roundtable_registrations ' +
           'WHERE submission_id = ANY($1::uuid[])',
         [submissionIds],
@@ -444,6 +736,8 @@ export class PgAdminRepository {
             ? {
                 email: roundtable.email,
                 fullName: roundtable.full_name,
+                id: roundtable.id,
+                position: roundtable.position,
                 registeredAt: toIso(roundtable.registered_at),
               }
             : null,
@@ -500,7 +794,7 @@ export class PgAdminRepository {
       ),
       this.pool.query<RoundtableRow>(
         `
-        SELECT submission_id, full_name, email, registered_at
+        SELECT id, submission_id, full_name, email, position, registered_at
         FROM public.cwi_roundtable_registrations
         WHERE submission_id = $1
         LIMIT 1
@@ -532,6 +826,8 @@ export class PgAdminRepository {
         ? {
             email: roundtableResult.rows[0].email,
             fullName: roundtableResult.rows[0].full_name,
+            id: roundtableResult.rows[0].id,
+            position: roundtableResult.rows[0].position,
             registeredAt: toIso(roundtableResult.rows[0].registered_at),
           }
         : null,

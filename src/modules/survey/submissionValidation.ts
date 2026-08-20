@@ -27,6 +27,8 @@ export type Participant = {
 export type RoundtableRegistration = {
   email: string
   fullName: string
+  id: string | null
+  position: string | null
   registered: true
 }
 
@@ -89,6 +91,8 @@ const rawSubmissionSchema = z
       .object({
         email: z.string().trim().email().max(254).optional(),
         fullName: z.string().trim().min(1).max(160).optional(),
+        id: z.string().uuid().optional(),
+        position: z.string().trim().min(1).max(160).optional(),
         registered: z.boolean(),
       })
       .strict()
@@ -238,6 +242,8 @@ function normalizeRoundtable(raw: RawSubmission['roundtableRegistration']): Roun
   return {
     email: normalizeEmail(raw.email),
     fullName: normalizeText(raw.fullName),
+    id: raw.id ?? null,
+    position: raw.position ? normalizeText(raw.position) : null,
     registered: true,
   }
 }

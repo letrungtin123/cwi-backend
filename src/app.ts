@@ -14,6 +14,8 @@ import { createAuthRouter } from './modules/auth/authRoutes.js'
 import type { AuthService } from './modules/auth/authService.js'
 import type { ReportAssetStorage } from './modules/reports/reportAssetStorage.js'
 import type { PgReportRepository } from './modules/reports/reportRepository.js'
+import { createRoundtableRouter } from './modules/roundtable/roundtableRoutes.js'
+import type { RoundtableService } from './modules/roundtable/roundtableService.js'
 import { createSurveyRouter } from './modules/survey/surveyRoutes.js'
 import type { SurveyService } from './modules/survey/surveyService.js'
 
@@ -24,6 +26,7 @@ export type AppDependencies = {
   logger: Logger
   reportAssetStorage: ReportAssetStorage
   reportRepository: PgReportRepository
+  roundtableService: RoundtableService
   surveyService: SurveyService
 }
 
@@ -82,7 +85,7 @@ function handleError(logger: Logger) {
 }
 
 export function createApp(dependencies: AppDependencies) {
-  const { adminRepository, authService, config, logger, reportAssetStorage, reportRepository, surveyService } = dependencies
+  const { adminRepository, authService, config, logger, reportAssetStorage, reportRepository, roundtableService, surveyService } = dependencies
   const app = express()
 
   app.disable('x-powered-by')
@@ -118,6 +121,7 @@ export function createApp(dependencies: AppDependencies) {
   })
 
   app.use('/api/v1/auth', createAuthRouter(authService, config))
+  app.use('/api/v1/roundtable-registrations', createRoundtableRouter(roundtableService, config))
   app.use('/api/v1/survey-submissions', createSurveyRouter(surveyService, config))
   app.use('/api/v1/admin', createAdminRouter(adminRepository, reportRepository, reportAssetStorage, authService, config))
 

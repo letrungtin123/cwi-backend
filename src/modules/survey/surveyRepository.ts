@@ -164,18 +164,65 @@ export class PgSurveyRepository implements SurveyRepository {
       )
 
       if (input.roundtableRegistration) {
-        await client.query(
-          `
-          INSERT INTO public.cwi_roundtable_registrations (
-            submission_id,
-            registered,
-            full_name,
-            email
+        if (input.roundtableRegistration.id) {
+          const linkedRoundtable = await client.query<{ id: string }>(
+            `
+            UPDATE public.cwi_roundtable_registrations
+            SET submission_id = $1,
+                full_name = $2,
+                email = $3,
+                position = $4,
+                linked_at = COALESCE(linked_at, now()),
+                updated_at = now()
+            WHERE id = $5
+              AND (submission_id IS NULL OR submission_id = $1)
+            RETURNING id
+            `,
+            [
+              submission.id,
+              input.roundtableRegistration.fullName,
+              input.roundtableRegistration.email,
+              input.roundtableRegistration.position,
+              input.roundtableRegistration.id,
+            ],
           )
-          VALUES ($1, true, $2, $3)
-          `,
-          [submission.id, input.roundtableRegistration.fullName, input.roundtableRegistration.email],
-        )
+
+          if (!linkedRoundtable.rows[0]) {
+            throw new HttpError(
+              409,
+              'roundtable_registration_link_conflict',
+              'Roundtable registration could not be linked to this survey submission.',
+            )
+          }
+        } else {
+          await client.query(
+            `
+            INSERT INTO public.cwi_roundtable_registrations (
+              submission_id,
+              registered,
+              full_name,
+              email,
+              position,
+              source,
+              client_ip_hash,
+              user_agent,
+              client_meta,
+              linked_at
+            )
+            VALUES ($1, true, $2, $3, $4, $5, $6, $7, $8::jsonb, now())
+            `,
+            [
+              submission.id,
+              input.roundtableRegistration.fullName,
+              input.roundtableRegistration.email,
+              input.roundtableRegistration.position,
+              meta.source,
+              meta.clientIpHash,
+              meta.userAgent,
+              JSON.stringify(input.clientMeta),
+            ],
+          )
+        }
       }
 
       if (reportJob) {

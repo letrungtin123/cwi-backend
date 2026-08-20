@@ -11,6 +11,7 @@ import type { PgAdminRepository } from './adminRepository.js'
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const validStatuses = new Set(['part1_only', 'part2_refused_privacy', 'full_private_report'])
+const validRoundtableLinkStatuses = new Set(['linked', 'standalone'])
 
 function parseLimit(value: unknown) {
   if (typeof value !== 'string') return 50
@@ -76,6 +77,12 @@ function parseRoundtable(value: unknown) {
   throw new HttpError(400, 'invalid_roundtable_filter', 'roundtable filter must be true or false.')
 }
 
+function parseRoundtableLinkStatus(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  if (validRoundtableLinkStatuses.has(value)) return value as 'linked' | 'standalone'
+  throw new HttpError(400, 'invalid_roundtable_link_filter', 'roundtable link filter must be linked or standalone.')
+}
+
 function assertUuid(id: string | undefined, code: string, message: string) {
   if (!id || !uuidPattern.test(id)) {
     throw new HttpError(400, code, message)
@@ -110,6 +117,39 @@ export function createAdminRouter(
   const router = Router()
 
   router.use(requireAdminSession(authService, config))
+
+  router.get('/roundtable-registrations/stats', async (_req, res, next) => {
+    try {
+      const data = await repository.getRoundtableRegistrationStats()
+      res.json({ data })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  router.get('/roundtable-registrations', async (req, res, next) => {
+    try {
+      const data = await repository.listRoundtableRegistrations({
+        before: parseBefore(req.query.before),
+        limit: parseLimit(req.query.limit),
+        linkStatus: parseRoundtableLinkStatus(req.query.linkStatus),
+        search: parseSearch(req.query.search),
+      })
+      res.json({ data })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  router.get('/roundtable-registrations/:id', async (req, res, next) => {
+    try {
+      const id = assertUuid(req.params.id, 'invalid_roundtable_registration_id', 'Roundtable registration id must be a UUID.')
+      const data = await repository.getRoundtableRegistration(id)
+      res.json({ data })
+    } catch (error) {
+      next(error)
+    }
+  })
 
   router.get('/survey-submissions/stats', async (_req, res, next) => {
     try {

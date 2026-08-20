@@ -8,6 +8,8 @@ import { PgAuthRepository } from './modules/auth/authRepository.js'
 import { AuthService } from './modules/auth/authService.js'
 import { ReportAssetStorage } from './modules/reports/reportAssetStorage.js'
 import { PgReportRepository } from './modules/reports/reportRepository.js'
+import { PgRoundtableRepository } from './modules/roundtable/roundtableRepository.js'
+import { RoundtableService } from './modules/roundtable/roundtableService.js'
 import { PgSurveyRepository } from './modules/survey/surveyRepository.js'
 import { SurveyService } from './modules/survey/surveyService.js'
 
@@ -43,6 +45,7 @@ const config: RuntimeConfig = {
 }
 
 const surveyRepository = new PgSurveyRepository(pool)
+const roundtableRepository = new PgRoundtableRepository(pool)
 const adminRepository = new PgAdminRepository(pool)
 const reportRepository = new PgReportRepository(pool)
 const authRepository = new PgAuthRepository(pool)
@@ -56,7 +59,8 @@ const reportAssetStorage = new ReportAssetStorage({
 
 // Temporarily disabled: do not enqueue or call the cwi-ai report service.
 const surveyService = new SurveyService(surveyRepository)
-const app = createApp({ adminRepository, authService, config, logger, reportAssetStorage, reportRepository, surveyService })
+const roundtableService = new RoundtableService(roundtableRepository)
+const app = createApp({ adminRepository, authService, config, logger, reportAssetStorage, reportRepository, roundtableService, surveyService })
 
 const server = app.listen(env.port, env.host, () => {
   logger.info({ host: env.host, port: env.port }, 'CWI backend listening')
