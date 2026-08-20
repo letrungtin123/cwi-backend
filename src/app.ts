@@ -12,6 +12,8 @@ import { createAdminRouter } from './modules/admin/adminRoutes.js'
 import type { PgAdminRepository } from './modules/admin/adminRepository.js'
 import { createAuthRouter } from './modules/auth/authRoutes.js'
 import type { AuthService } from './modules/auth/authService.js'
+import type { ReportAssetStorage } from './modules/reports/reportAssetStorage.js'
+import type { PgReportRepository } from './modules/reports/reportRepository.js'
 import { createSurveyRouter } from './modules/survey/surveyRoutes.js'
 import type { SurveyService } from './modules/survey/surveyService.js'
 
@@ -20,6 +22,8 @@ export type AppDependencies = {
   authService: AuthService
   config: RuntimeConfig
   logger: Logger
+  reportAssetStorage: ReportAssetStorage
+  reportRepository: PgReportRepository
   surveyService: SurveyService
 }
 
@@ -78,7 +82,7 @@ function handleError(logger: Logger) {
 }
 
 export function createApp(dependencies: AppDependencies) {
-  const { adminRepository, authService, config, logger, surveyService } = dependencies
+  const { adminRepository, authService, config, logger, reportAssetStorage, reportRepository, surveyService } = dependencies
   const app = express()
 
   app.disable('x-powered-by')
@@ -115,7 +119,7 @@ export function createApp(dependencies: AppDependencies) {
 
   app.use('/api/v1/auth', createAuthRouter(authService, config))
   app.use('/api/v1/survey-submissions', createSurveyRouter(surveyService, config))
-  app.use('/api/v1/admin', createAdminRouter(adminRepository, authService, config))
+  app.use('/api/v1/admin', createAdminRouter(adminRepository, reportRepository, reportAssetStorage, authService, config))
 
   app.use(handleNotFound)
   app.use(handleError(logger))

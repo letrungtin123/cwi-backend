@@ -2,6 +2,7 @@ import type pg from 'pg'
 import { withTransaction } from '../../db/transaction.js'
 import { HttpError } from '../../http/errors.js'
 import type { RequestMeta } from '../../http/requestMeta.js'
+import type { ReportJobCreateInput } from '../reports/reportPayload.js'
 import type { NormalizedAnswer, NormalizedSurveySubmission } from './submissionValidation.js'
 
 export type SubmissionCreateResult = {
@@ -11,7 +12,7 @@ export type SubmissionCreateResult = {
 }
 
 export interface SurveyRepository {
-  createSubmission(input: NormalizedSurveySubmission, meta: RequestMeta): Promise<SubmissionCreateResult>
+  createSubmission(input: NormalizedSurveySubmission, meta: RequestMeta, reportJob?: ReportJobCreateInput | null): Promise<SubmissionCreateResult>
 }
 
 type ExistingSubmissionRow = {
@@ -56,7 +57,7 @@ function buildAnswerInsert(answers: readonly NormalizedAnswer[], submissionId: s
 export class PgSurveyRepository implements SurveyRepository {
   constructor(private readonly pool: pg.Pool) {}
 
-  async createSubmission(input: NormalizedSurveySubmission, meta: RequestMeta): Promise<SubmissionCreateResult> {
+  async createSubmission(input: NormalizedSurveySubmission, meta: RequestMeta, reportJob: ReportJobCreateInput | null = null): Promise<SubmissionCreateResult> {
     return withTransaction(this.pool, async (client) => {
       if (input.idempotencyKey) {
         const existing = await client.query<ExistingSubmissionRow>(
@@ -174,6 +175,23 @@ export class PgSurveyRepository implements SurveyRepository {
           VALUES ($1, true, $2, $3)
           `,
           [submission.id, input.roundtableRegistration.fullName, input.roundtableRegistration.email],
+        )
+      }
+
+      if (reportJob) {
+        await client.query(
+          `
+          INSERT INTO public.cwi_report_jobs (
+            submission_id,
+            report_type,
+            provider_endpoint,
+            status,
+            request_payload,
+            next_poll_at
+          )
+          VALUES ($1, $2, $3, 'pending', $4::jsonb, now())
+          `,
+          [submission.id, reportJob.reportType, reportJob.providerEndpoint, JSON.stringify(reportJob.requestPayload)],
         )
       }
 

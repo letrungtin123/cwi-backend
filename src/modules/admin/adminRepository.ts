@@ -1,6 +1,16 @@
 import type pg from 'pg'
 import { HttpError } from '../../http/errors.js'
 
+export type ReportSummary = {
+  errorMessage: string | null
+  jobId: string | null
+  label: string
+  pdfAvailable: boolean
+  pdfDownloadUrl: string | null
+  status: 'not_started' | 'generating' | 'completed' | 'failed' | 'skipped'
+  updatedAt: string | null
+}
+
 export type SubmissionListItem = {
   answersCount: number
   email: string
@@ -11,6 +21,7 @@ export type SubmissionListItem = {
   part2Completed: boolean
   position: string
   privacyConsent: string
+  report: ReportSummary
   roundtableRegistered: boolean
   scaleScore: number
   statusNote: string
@@ -52,6 +63,11 @@ type SubmissionRow = {
   part2_completed: boolean
   position: string
   privacy_consent: string
+  report_job_id: string | null
+  report_last_error_message: string | null
+  report_pdf_storage_path: string | null
+  report_status: string | null
+  report_updated_at: Date | null
   roundtable_registered: boolean
   scale_score: number
   source: string
@@ -104,8 +120,103 @@ type StatsRow = {
   total_submissions: string
 }
 
+const submissionSelect = `
+  SELECT
+    s.id,
+    s.submission_status,
+    s.status_note,
+    s.full_name,
+    s.email,
+    s.position,
+    s.privacy_consent,
+    s.part1_completed,
+    s.part2_completed,
+    s.answers_count,
+    s.roundtable_registered,
+    s.overall_score,
+    s.scale_score,
+    s.domain_scores,
+    s.source,
+    s.client_meta,
+    s.submitted_at,
+    report.id AS report_job_id,
+    report.status AS report_status,
+    report.updated_at AS report_updated_at,
+    report.pdf_storage_path AS report_pdf_storage_path,
+    COALESCE(report.last_error_message, report.error_message) AS report_last_error_message
+  FROM public.cwi_survey_submissions AS s
+  LEFT JOIN LATERAL (
+    SELECT id, status, updated_at, pdf_storage_path, last_error_message, error_message
+    FROM public.cwi_report_jobs
+    WHERE submission_id = s.id
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  ) AS report ON true
+`
+
 function toIso(value: Date) {
   return value.toISOString()
+}
+
+function mapReportSummary(row: SubmissionRow): ReportSummary {
+  if (!row.report_job_id) {
+    return {
+      errorMessage: null,
+      jobId: null,
+      label: 'Chưa tạo báo cáo',
+      pdfAvailable: false,
+      pdfDownloadUrl: null,
+      status: 'not_started',
+      updatedAt: null,
+    }
+  }
+
+  if (row.report_status === 'completed') {
+    const pdfAvailable = Boolean(row.report_pdf_storage_path)
+    return {
+      errorMessage: null,
+      jobId: row.report_job_id,
+      label: pdfAvailable ? 'Đã tạo báo cáo' : 'Đã tạo, thiếu PDF',
+      pdfAvailable,
+      pdfDownloadUrl: pdfAvailable ? `/api/v1/admin/report-jobs/${row.report_job_id}/pdf` : null,
+      status: 'completed',
+      updatedAt: row.report_updated_at ? toIso(row.report_updated_at) : null,
+    }
+  }
+
+  if (row.report_status === 'failed') {
+    return {
+      errorMessage: row.report_last_error_message,
+      jobId: row.report_job_id,
+      label: 'Tạo báo cáo lỗi',
+      pdfAvailable: false,
+      pdfDownloadUrl: null,
+      status: 'failed',
+      updatedAt: row.report_updated_at ? toIso(row.report_updated_at) : null,
+    }
+  }
+
+  if (row.report_status === 'skipped') {
+    return {
+      errorMessage: row.report_last_error_message,
+      jobId: row.report_job_id,
+      label: 'Không tạo báo cáo',
+      pdfAvailable: false,
+      pdfDownloadUrl: null,
+      status: 'skipped',
+      updatedAt: row.report_updated_at ? toIso(row.report_updated_at) : null,
+    }
+  }
+
+  return {
+    errorMessage: row.report_last_error_message,
+    jobId: row.report_job_id,
+    label: 'Đang tạo báo cáo',
+    pdfAvailable: false,
+    pdfDownloadUrl: null,
+    status: 'generating',
+    updatedAt: row.report_updated_at ? toIso(row.report_updated_at) : null,
+  }
 }
 
 function mapListItem(row: SubmissionRow): SubmissionListItem {
@@ -119,6 +230,7 @@ function mapListItem(row: SubmissionRow): SubmissionListItem {
     part2Completed: row.part2_completed,
     position: row.position,
     privacyConsent: row.privacy_consent,
+    report: mapReportSummary(row),
     roundtableRegistered: row.roundtable_registered,
     scaleScore: row.scale_score,
     statusNote: row.status_note,
@@ -138,47 +250,29 @@ export class PgAdminRepository {
 
   async listSubmissions(filters: SubmissionListFilters): Promise<SubmissionListItem[]> {
     const params: unknown[] = [filters.before]
-    const where = ['($1::timestamptz IS NULL OR submitted_at < $1::timestamptz)']
+    const where = ['($1::timestamptz IS NULL OR s.submitted_at < $1::timestamptz)']
 
     if (filters.status) {
       params.push(filters.status)
-      where.push(`submission_status = $${params.length}`)
+      where.push(`s.submission_status = $${params.length}`)
     }
 
     if (filters.roundtableRegistered !== null) {
       params.push(filters.roundtableRegistered)
-      where.push(`roundtable_registered = $${params.length}`)
+      where.push(`s.roundtable_registered = $${params.length}`)
     }
 
     if (filters.search) {
       params.push(`%${filters.search}%`)
-      where.push(`(full_name ILIKE $${params.length} OR email ILIKE $${params.length} OR position ILIKE $${params.length})`)
+      where.push(`(s.full_name ILIKE $${params.length} OR s.email ILIKE $${params.length} OR s.position ILIKE $${params.length})`)
     }
 
     params.push(filters.limit)
     const result = await this.pool.query<SubmissionRow>(
       `
-      SELECT
-        id,
-        submission_status,
-        status_note,
-        full_name,
-        email,
-        position,
-        privacy_consent,
-        part1_completed,
-        part2_completed,
-        answers_count,
-        roundtable_registered,
-        overall_score,
-        scale_score,
-        domain_scores,
-        source,
-        client_meta,
-        submitted_at
-      FROM public.cwi_survey_submissions
+      ${submissionSelect}
       WHERE ${where.join(' AND ')}
-      ORDER BY submitted_at DESC, id DESC
+      ORDER BY s.submitted_at DESC, s.id DESC
       LIMIT $${params.length}
       `,
       params,
@@ -218,26 +312,8 @@ export class PgAdminRepository {
     const [submissionResult, answersResult, roundtableResult] = await Promise.all([
       this.pool.query<SubmissionRow>(
         `
-        SELECT
-          id,
-          submission_status,
-          status_note,
-          full_name,
-          email,
-          position,
-          privacy_consent,
-          part1_completed,
-          part2_completed,
-          answers_count,
-          roundtable_registered,
-          overall_score,
-          scale_score,
-          domain_scores,
-          source,
-          client_meta,
-          submitted_at
-        FROM public.cwi_survey_submissions
-        WHERE id = $1
+        ${submissionSelect}
+        WHERE s.id = $1
         LIMIT 1
         `,
         [id],

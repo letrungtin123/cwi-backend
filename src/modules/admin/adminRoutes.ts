@@ -1,8 +1,12 @@
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { Router } from 'express'
 import type { RuntimeConfig } from '../../config/runtime.js'
 import { requireAdminSession } from '../../http/adminSession.js'
 import { HttpError } from '../../http/errors.js'
 import type { AuthService } from '../auth/authService.js'
+import { ReportAssetStorageError, type ReportAssetStorage } from '../reports/reportAssetStorage.js'
+import type { PgReportRepository } from '../reports/reportRepository.js'
 import type { PgAdminRepository } from './adminRepository.js'
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -45,7 +49,37 @@ function parseRoundtable(value: unknown) {
   throw new HttpError(400, 'invalid_roundtable_filter', 'roundtable filter must be true or false.')
 }
 
-export function createAdminRouter(repository: PgAdminRepository, authService: AuthService, config: RuntimeConfig) {
+function assertUuid(id: string | undefined, code: string, message: string) {
+  if (!id || !uuidPattern.test(id)) {
+    throw new HttpError(400, code, message)
+  }
+  return id
+}
+
+function reportStorageErrorToHttp(error: ReportAssetStorageError): HttpError {
+  if (error.status === 404) {
+    return new HttpError(404, 'report_pdf_missing', 'Report PDF file is missing from storage.')
+  }
+
+  if (error.retryable) {
+    return new HttpError(503, 'report_storage_unavailable', 'Report storage is temporarily unavailable.')
+  }
+
+  return new HttpError(500, 'report_storage_error', 'Report storage request failed.')
+}
+
+function contentDisposition(value: unknown) {
+  const mode = value === '1' || value === 'true' ? 'attachment' : 'inline'
+  return `${mode}; filename="cwi-report.pdf"`
+}
+
+export function createAdminRouter(
+  repository: PgAdminRepository,
+  reportRepository: PgReportRepository,
+  reportAssetStorage: ReportAssetStorage,
+  authService: AuthService,
+  config: RuntimeConfig,
+) {
   const router = Router()
 
   router.use(requireAdminSession(authService, config))
@@ -55,6 +89,32 @@ export function createAdminRouter(repository: PgAdminRepository, authService: Au
       const data = await repository.getSubmissionStats()
       res.json({ data })
     } catch (error) {
+      next(error)
+    }
+  })
+
+  router.get('/report-jobs/:id/pdf', async (req, res, next) => {
+    try {
+      const id = assertUuid(req.params.id, 'invalid_report_job_id', 'Report job id must be a UUID.')
+      const reportJob = await reportRepository.getReportJobDownload(id)
+      if (!reportJob) {
+        throw new HttpError(404, 'report_pdf_not_found', 'Report PDF is not available.')
+      }
+
+      const asset = await reportAssetStorage.download(reportJob.pdfStoragePath)
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.setHeader('Content-Disposition', contentDisposition(req.query.download))
+      res.setHeader('Content-Type', asset.contentType || 'application/pdf')
+      res.setHeader('X-Content-Type-Options', 'nosniff')
+      if (asset.contentLength) res.setHeader('Content-Length', asset.contentLength)
+
+      await pipeline(Readable.fromWeb(asset.body), res)
+    } catch (error) {
+      if (error instanceof ReportAssetStorageError) {
+        next(reportStorageErrorToHttp(error))
+        return
+      }
+
       next(error)
     }
   })
@@ -76,11 +136,7 @@ export function createAdminRouter(repository: PgAdminRepository, authService: Au
 
   router.get('/survey-submissions/:id', async (req, res, next) => {
     try {
-      const id = req.params.id
-      if (!id || !uuidPattern.test(id)) {
-        throw new HttpError(400, 'invalid_submission_id', 'Submission id must be a UUID.')
-      }
-
+      const id = assertUuid(req.params.id, 'invalid_submission_id', 'Submission id must be a UUID.')
       const data = await repository.getSubmission(id)
       res.json({ data })
     } catch (error) {

@@ -8,6 +8,27 @@ const booleanSchema = z.preprocess((value) => {
   return value
 }, z.boolean().optional())
 
+const nullablePathSchema = z.preprocess((value) => {
+  if (typeof value !== 'string') return value
+  const trimmed = value.trim()
+  return trimmed ? trimmed : undefined
+}, z.string().optional())
+
+const phonePlaceholderSchema = z
+  .string()
+  .trim()
+  .min(6)
+  .max(32)
+  .regex(/^[0-9+().\-\s]+$/)
+  .default('00000000')
+
+const bucketNameSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(63)
+  .regex(/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/)
+
 const envSchema = z
   .object({
     AUTH_COOKIE_DOMAIN: z.string().optional(),
@@ -24,18 +45,32 @@ const envSchema = z
     DB_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
     DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(10),
     DB_SSL: booleanSchema.default(false),
+    HOST: z.string().trim().min(1).default('0.0.0.0'),
     IP_HASH_SECRET: z.string().optional(),
     LOG_LEVEL: z.string().default('info'),
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    PDF_BROWSER_PATH: nullablePathSchema,
+    PDF_RENDER_TIMEOUT_MS: z.coerce.number().int().min(10000).max(600000).default(120000),
     PORT: z.coerce.number().int().min(1).max(65535).default(8080),
     RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10000).default(60),
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
+    REPORT_PARTICIPANT_PHONE_PLACEHOLDER: phonePlaceholderSchema,
     REPORT_SERVICE_BASE_URL: z.string().url().default('http://127.0.0.1:8000'),
+    REPORT_STORAGE_BUCKET: bucketNameSchema.default('cwi-report-assets'),
+    REPORT_STORAGE_UPLOAD_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300000).default(60000),
     REPORT_SERVICE_ENABLED: booleanSchema.default(false),
-    REPORT_SERVICE_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+    REPORT_SERVICE_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300000).default(10000),
+    REPORT_STORAGE_DIR: z.string().trim().min(1).default('./storage/reports'),
+    REPORT_WORKER_INITIAL_POLL_DELAY_MS: z.coerce.number().int().min(1000).max(600000).default(10000),
+    REPORT_WORKER_LOCK_MS: z.coerce.number().int().min(30000).max(1800000).default(300000),
+    REPORT_WORKER_LOOP_INTERVAL_MS: z.coerce.number().int().min(500).max(60000).default(2000),
+    REPORT_WORKER_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+    REPORT_WORKER_MAX_POLL_DELAY_MS: z.coerce.number().int().min(5000).max(600000).default(60000),
     REQUEST_BODY_LIMIT: z.string().default('256kb'),
     SUPABASE_ANON_KEY: z.string().optional(),
     SUPABASE_AUTH_URL: z.string().url().optional(),
+    SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+    SUPABASE_STORAGE_URL: z.string().url().default('http://127.0.0.1:55321/storage/v1'),
     TRUST_PROXY: booleanSchema.default(false),
   })
   .superRefine((value, ctx) => {
@@ -48,7 +83,6 @@ const envSchema = z
     }
 
     if (value.NODE_ENV === 'production') {
-
       if (!value.IP_HASH_SECRET || value.IP_HASH_SECRET.length < 32) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -86,6 +120,24 @@ const envSchema = z
           code: z.ZodIssueCode.custom,
           message: 'AUTH_COOKIE_SECURE must be true in production',
           path: ['AUTH_COOKIE_SECURE'],
+        })
+      }
+    }
+
+    if (value.REPORT_SERVICE_ENABLED) {
+      if (!value.SUPABASE_SERVICE_ROLE_KEY || value.SUPABASE_SERVICE_ROLE_KEY.length < 32) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'SUPABASE_SERVICE_ROLE_KEY is required when REPORT_SERVICE_ENABLED is true',
+          path: ['SUPABASE_SERVICE_ROLE_KEY'],
+        })
+      }
+
+      if (value.NODE_ENV === 'production' && !process.env.SUPABASE_STORAGE_URL?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'SUPABASE_STORAGE_URL must be set explicitly in production when report generation is enabled',
+          path: ['SUPABASE_STORAGE_URL'],
         })
       }
     }
@@ -128,17 +180,31 @@ export const env = {
   dbIdleTimeoutMs: parsed.data.DB_IDLE_TIMEOUT_MS,
   dbPoolMax: parsed.data.DB_POOL_MAX,
   dbSsl: parsed.data.DB_SSL,
+  host: parsed.data.HOST,
   ipHashSecret: parsed.data.IP_HASH_SECRET ?? 'development-only-ip-hash-secret',
   logLevel: parsed.data.LOG_LEVEL,
   nodeEnv: parsed.data.NODE_ENV,
+  pdfBrowserPath: parsed.data.PDF_BROWSER_PATH ?? null,
+  pdfRenderTimeoutMs: parsed.data.PDF_RENDER_TIMEOUT_MS,
   port: parsed.data.PORT,
   rateLimitMax: parsed.data.RATE_LIMIT_MAX,
   rateLimitWindowMs: parsed.data.RATE_LIMIT_WINDOW_MS,
+  reportParticipantPhonePlaceholder: parsed.data.REPORT_PARTICIPANT_PHONE_PLACEHOLDER,
   reportServiceBaseUrl: parsed.data.REPORT_SERVICE_BASE_URL,
   reportServiceEnabled: parsed.data.REPORT_SERVICE_ENABLED,
   reportServiceTimeoutMs: parsed.data.REPORT_SERVICE_TIMEOUT_MS,
+  reportStorageBucket: parsed.data.REPORT_STORAGE_BUCKET,
+  reportStorageDir: parsed.data.REPORT_STORAGE_DIR,
+  reportStorageUploadTimeoutMs: parsed.data.REPORT_STORAGE_UPLOAD_TIMEOUT_MS,
+  reportWorkerInitialPollDelayMs: parsed.data.REPORT_WORKER_INITIAL_POLL_DELAY_MS,
+  reportWorkerLockMs: parsed.data.REPORT_WORKER_LOCK_MS,
+  reportWorkerLoopIntervalMs: parsed.data.REPORT_WORKER_LOOP_INTERVAL_MS,
+  reportWorkerMaxAttempts: parsed.data.REPORT_WORKER_MAX_ATTEMPTS,
+  reportWorkerMaxPollDelayMs: parsed.data.REPORT_WORKER_MAX_POLL_DELAY_MS,
   requestBodyLimit: parsed.data.REQUEST_BODY_LIMIT,
   supabaseAnonKey: parsed.data.SUPABASE_ANON_KEY ?? '',
   supabaseAuthUrl: parsed.data.SUPABASE_AUTH_URL ?? 'http://127.0.0.1:55321/auth/v1',
+  supabaseServiceRoleKey: parsed.data.SUPABASE_SERVICE_ROLE_KEY ?? '',
+  supabaseStorageUrl: parsed.data.SUPABASE_STORAGE_URL,
   trustProxy: parsed.data.TRUST_PROXY,
 } as const

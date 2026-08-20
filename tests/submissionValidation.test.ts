@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { HttpError } from '../src/http/errors.js'
 import { buildAnonymousReportPayload } from '../src/modules/reports/anonymousReportPayload.js'
+import { buildReportObjectPaths } from '../src/modules/reports/reportAssetStorage.js'
+import { buildReportJobRequest } from '../src/modules/reports/reportPayload.js'
 import { normalizeSurveySubmission } from '../src/modules/survey/submissionValidation.js'
 
 function partOneAnswers() {
@@ -30,7 +32,7 @@ const participant = {
 }
 
 describe('normalizeSurveySubmission', () => {
-  it('normalizes part1_only submissions and maps email to future anonymous report payload', () => {
+  it('normalizes part1_only submissions and maps the anonymous report payload', () => {
     const submission = normalizeSurveySubmission(
       {
         answers: partOneAnswers(),
@@ -49,10 +51,11 @@ describe('normalizeSurveySubmission', () => {
 
     const reportPayload = buildAnonymousReportPayload(submission)
     expect(reportPayload.participant).toEqual({
-      email: 'an@company.com',
       full_name: 'Nguyễn Văn An',
+      phone_number: '00000000',
       position: 'HRM',
     })
+    expect(reportPayload.cohort_consent).toBe(false)
     expect(reportPayload.answers).toHaveLength(18)
   })
 
@@ -96,6 +99,14 @@ describe('normalizeSurveySubmission', () => {
       registered: true,
     })
     expect(submission.statusNote).toContain('Đồng ý')
+
+    const reportJob = buildReportJobRequest(submission, { participantPhonePlaceholder: '00000000' })
+    expect(reportJob.providerEndpoint).toBe('/v2/reports/personalized')
+    expect(reportJob.reportType).toBe('personalized')
+    expect(reportJob.requestPayload.answers).toHaveLength(23)
+    expect(reportJob.requestPayload.company?.website).toBe('https://example.com')
+    expect(reportJob.requestPayload.cohort_consent).toBe(true)
+    expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 23)?.answer).toBe('Từ 300 đến dưới 1000 tỉ VND')
   })
 
   it('rejects part1_only submissions that include Part 2 answers', () => {
@@ -124,5 +135,18 @@ describe('normalizeSurveySubmission', () => {
         null,
       ),
     ).toThrow(HttpError)
+  })
+})
+describe('buildReportObjectPaths', () => {
+  it('builds stable private storage paths without participant identifiers', () => {
+    const paths = buildReportObjectPaths({
+      reportJobId: 'job-456',
+      submissionId: 'submission-123',
+      timestamp: new Date('2026-08-19T00:00:00.000Z'),
+    })
+
+    expect(paths.htmlPath).toBe('reports/2026/08/submission-123/job-456/report.html')
+    expect(paths.pdfPath).toBe('reports/2026/08/submission-123/job-456/report.pdf')
+    expect(`${paths.htmlPath}${paths.pdfPath}`).not.toContain('@')
   })
 })
