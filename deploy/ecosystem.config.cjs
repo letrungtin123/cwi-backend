@@ -17,7 +17,7 @@ module.exports = {
     {
       name: 'cwi-backend',
       cwd: backendRoot,
-      script: 'dist/server.js',
+      script: 'deploy/start-backend.mjs',
       interpreter: nodePath,
       env: {
         NODE_ENV: nodeEnv,
