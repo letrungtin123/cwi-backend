@@ -18,6 +18,33 @@ function parseLimit(value: unknown) {
   if (!Number.isInteger(parsed)) return 50
   return Math.min(100, Math.max(1, parsed))
 }
+function parsePage(value: unknown) {
+  if (value === undefined) return 1
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
+    throw new HttpError(400, 'invalid_page', 'page must be a positive integer.')
+  }
+
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed > 100_000) {
+    throw new HttpError(400, 'invalid_page', 'page must be between 1 and 100000.')
+  }
+
+  return parsed
+}
+
+function parseFullListLimit(value: unknown) {
+  if (value === undefined) return 50
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
+    throw new HttpError(400, 'invalid_limit', 'limit must be a positive integer.')
+  }
+
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed > 100) {
+    throw new HttpError(400, 'invalid_limit', 'limit must be between 1 and 100.')
+  }
+
+  return parsed
+}
 
 function parseBefore(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
@@ -134,6 +161,34 @@ export function createAdminRouter(
     }
   })
 
+  router.get('/survey-submissions/full', async (req, res, next) => {
+    try {
+      const page = parsePage(req.query.page)
+      const limit = parseFullListLimit(req.query.limit)
+      const result = await repository.listSubmissionDetails({
+        limit,
+        page,
+        roundtableRegistered: parseRoundtable(req.query.roundtable),
+        search: parseSearch(req.query.search),
+        status: parseStatus(req.query.status),
+      })
+      const totalPages = result.totalItems === 0 ? 0 : Math.ceil(result.totalItems / limit)
+
+      res.json({
+        data: result.items,
+        pagination: {
+          hasNextPage: page < totalPages,
+          hasPreviousPage: page > 1 && totalPages > 0,
+          limit,
+          page,
+          totalItems: result.totalItems,
+          totalPages,
+        },
+      })
+    } catch (error) {
+      next(error)
+    }
+  })
   router.get('/survey-submissions/:id', async (req, res, next) => {
     try {
       const id = assertUuid(req.params.id, 'invalid_submission_id', 'Submission id must be a UUID.')

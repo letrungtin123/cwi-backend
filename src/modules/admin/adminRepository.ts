@@ -50,6 +50,20 @@ export type SubmissionDetail = SubmissionListItem & {
   scaleScore: number
   source: string
 }
+export type SubmissionFullItem = Omit<SubmissionDetail, 'overallScore' | 'scaleScore' | 'source'>
+
+export type SubmissionDetailListFilters = {
+  limit: number
+  page: number
+  roundtableRegistered: boolean | null
+  search: string | null
+  status: string | null
+}
+
+export type SubmissionDetailListResult = {
+  items: SubmissionFullItem[]
+  totalItems: number
+}
 
 type SubmissionRow = {
   answers_count: number
@@ -77,6 +91,7 @@ type SubmissionRow = {
 }
 
 type AnswerRow = {
+  submission_id: string
   answer_text: string
   answer_value: unknown
   other_text: string | null
@@ -87,6 +102,7 @@ type AnswerRow = {
 }
 
 type RoundtableRow = {
+  submission_id: string
   email: string
   full_name: string
   registered_at: Date
@@ -281,6 +297,142 @@ export class PgAdminRepository {
     return result.rows.map(mapListItem)
   }
 
+  async listSubmissionDetails(filters: SubmissionDetailListFilters): Promise<SubmissionDetailListResult> {
+    const pageParams: unknown[] = []
+    const pageWhere: string[] = []
+
+    if (filters.status) {
+      pageParams.push(filters.status)
+      pageWhere.push('s.submission_status = $' + pageParams.length)
+    }
+
+    if (filters.roundtableRegistered !== null) {
+      pageParams.push(filters.roundtableRegistered)
+      pageWhere.push('s.roundtable_registered = $' + pageParams.length)
+    }
+
+    if (filters.search) {
+      pageParams.push('%' + filters.search + '%')
+      pageWhere.push('(s.full_name ILIKE $' + pageParams.length + ' OR s.email ILIKE $' + pageParams.length + ' OR s.position ILIKE $' + pageParams.length + ')')
+    }
+
+    const pageWhereSql = pageWhere.length ? pageWhere.join(' AND ') : 'TRUE'
+    const offset = (filters.page - 1) * filters.limit
+    pageParams.push(filters.limit)
+    const limitParam = pageParams.length
+    pageParams.push(offset)
+    const offsetParam = pageParams.length
+
+    const countParams: unknown[] = []
+    const countWhere: string[] = []
+
+    if (filters.status) {
+      countParams.push(filters.status)
+      countWhere.push('s.submission_status = $' + countParams.length)
+    }
+
+    if (filters.roundtableRegistered !== null) {
+      countParams.push(filters.roundtableRegistered)
+      countWhere.push('s.roundtable_registered = $' + countParams.length)
+    }
+
+    if (filters.search) {
+      countParams.push('%' + filters.search + '%')
+      countWhere.push('(s.full_name ILIKE $' + countParams.length + ' OR s.email ILIKE $' + countParams.length + ' OR s.position ILIKE $' + countParams.length + ')')
+    }
+
+    const countWhereSql = countWhere.length ? countWhere.join(' AND ') : 'TRUE'
+    const [pageResult, countResult] = await Promise.all([
+      this.pool.query<SubmissionRow>(
+        submissionSelect +
+          '\nWHERE ' +
+          pageWhereSql +
+          '\nORDER BY s.submitted_at DESC, s.id DESC\nLIMIT $' +
+          limitParam +
+          '\nOFFSET $' +
+          offsetParam,
+        pageParams,
+      ),
+      this.pool.query<{ total_items: string }>(
+        'SELECT count(*)::text AS total_items FROM public.cwi_survey_submissions AS s WHERE ' + countWhereSql,
+        countParams,
+      ),
+    ])
+
+    const rows = pageResult.rows
+    const totalItems = toNumber(countResult.rows[0]?.total_items ?? null)
+    if (!rows.length) return { items: [], totalItems }
+
+    const submissionIds = rows.map((row) => row.id)
+    const [answersResult, roundtableResult] = await Promise.all([
+      this.pool.query<AnswerRow>(
+        'SELECT submission_id, question_idx, part, question_type, question_text, answer_value, answer_text, other_text ' +
+          'FROM public.cwi_survey_answers ' +
+          'WHERE submission_id = ANY($1::uuid[]) ORDER BY submission_id, question_idx ASC',
+        [submissionIds],
+      ),
+      this.pool.query<RoundtableRow>(
+        'SELECT submission_id, full_name, email, registered_at ' +
+          'FROM public.cwi_roundtable_registrations ' +
+          'WHERE submission_id = ANY($1::uuid[])',
+        [submissionIds],
+      ),
+    ])
+
+    const answersBySubmission = new Map<string, AnswerRow[]>()
+    for (const answer of answersResult.rows) {
+      const answers = answersBySubmission.get(answer.submission_id) ?? []
+      answers.push(answer)
+      answersBySubmission.set(answer.submission_id, answers)
+    }
+
+    const roundtableBySubmission = new Map(roundtableResult.rows.map((row) => [row.submission_id, row]))
+
+    return {
+      items: rows.map((row) => {
+        const listItem = mapListItem(row)
+        const listItemWithoutScores: Omit<SubmissionListItem, 'overallScore' | 'scaleScore'> = {
+          answersCount: listItem.answersCount,
+          email: listItem.email,
+          fullName: listItem.fullName,
+          id: listItem.id,
+          part1Completed: listItem.part1Completed,
+          part2Completed: listItem.part2Completed,
+          position: listItem.position,
+          privacyConsent: listItem.privacyConsent,
+          report: listItem.report,
+          roundtableRegistered: listItem.roundtableRegistered,
+          statusNote: listItem.statusNote,
+          submittedAt: listItem.submittedAt,
+          submissionStatus: listItem.submissionStatus,
+        }
+        const roundtable = roundtableBySubmission.get(row.id)
+
+        return {
+          ...listItemWithoutScores,
+          answers: (answersBySubmission.get(row.id) ?? []).map((answer) => ({
+            answerText: answer.answer_text,
+            answerValue: answer.answer_value,
+            idx: answer.question_idx,
+            otherText: answer.other_text,
+            part: answer.part,
+            questionText: answer.question_text,
+            questionType: answer.question_type,
+          })),
+          clientMeta: row.client_meta,
+          domainScores: row.domain_scores,
+          roundtableRegistration: roundtable
+            ? {
+                email: roundtable.email,
+                fullName: roundtable.full_name,
+                registeredAt: toIso(roundtable.registered_at),
+              }
+            : null,
+        }
+      }),
+      totalItems,
+    }
+  }
   async getSubmissionStats(): Promise<SubmissionStats> {
     const result = await this.pool.query<StatsRow>(
       `
@@ -320,7 +472,7 @@ export class PgAdminRepository {
       ),
       this.pool.query<AnswerRow>(
         `
-        SELECT question_idx, part, question_type, question_text, answer_value, answer_text, other_text
+        SELECT submission_id, question_idx, part, question_type, question_text, answer_value, answer_text, other_text
         FROM public.cwi_survey_answers
         WHERE submission_id = $1
         ORDER BY question_idx ASC
@@ -329,7 +481,7 @@ export class PgAdminRepository {
       ),
       this.pool.query<RoundtableRow>(
         `
-        SELECT full_name, email, registered_at
+        SELECT submission_id, full_name, email, registered_at
         FROM public.cwi_roundtable_registrations
         WHERE submission_id = $1
         LIMIT 1

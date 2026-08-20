@@ -5,6 +5,7 @@ if (isProduction) {
   process.env.AUTH_COOKIE_SAME_SITE = 'lax'
   process.env.CORS_ALLOWED_ORIGINS =
     process.env.CWI_CORS_ALLOWED_ORIGINS || process.env.CWI_PUBLIC_ORIGIN || 'https://ceo-workforce-index.com'
+  process.env.REPORT_SERVICE_ENABLED = 'false'
 }
 
 await import('../dist/server.js')
