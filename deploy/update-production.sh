@@ -65,6 +65,7 @@ CWI_NODE_ENV="${CWI_NODE_ENV}" \
 CWI_PUBLIC_ORIGIN="${CWI_PUBLIC_ORIGIN}" \
 pm2 start \
   "${platform_root}/cwi-backend/deploy/ecosystem.config.cjs" \
+  --env production \
   --update-env
 pm2 save
 
