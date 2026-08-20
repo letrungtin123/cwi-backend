@@ -56,7 +56,8 @@ if ! command -v pm2 >/dev/null 2>&1; then
   exit 1
 fi
 
-CWI_PLATFORM_ROOT="${platform_root}" pm2 startOrReload \
+pm2 delete cwi-backend cwi-public >/dev/null 2>&1 || true
+CWI_PLATFORM_ROOT="${platform_root}" pm2 start \
   "${platform_root}/cwi-backend/deploy/ecosystem.config.cjs" \
   --update-env
 pm2 save
