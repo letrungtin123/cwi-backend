@@ -13,7 +13,7 @@ module.exports = {
       script: 'dist/server.js',
       interpreter: nodePath,
       env: {
-        NODE_ENV: 'production',
+        NODE_ENV: process.env.CWI_NODE_ENV || 'development',
         HOST: '127.0.0.1',
         PORT: '8088',
       },
@@ -29,7 +29,7 @@ module.exports = {
       interpreter: nodePath,
       args: `--landing-root ${path.join(platformRoot, 'source4', 'dist')} --dashboard-root ${path.join(platformRoot, 'cwi-dashboard', 'dist')} --port 8080 --host 0.0.0.0 --api http://127.0.0.1:8088`,
       env: {
-        NODE_ENV: 'production',
+        NODE_ENV: process.env.CWI_NODE_ENV || 'development',
       },
       autorestart: true,
       max_memory_restart: '256M',
