@@ -33,7 +33,7 @@ function parsePage(value: unknown) {
 }
 
 function parseFullListLimit(value: unknown) {
-  if (value === undefined) return 50
+  if (value === undefined) return 10
   if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
     throw new HttpError(400, 'invalid_limit', 'limit must be a positive integer.')
   }
