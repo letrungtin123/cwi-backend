@@ -1,7 +1,7 @@
 const path = require('node:path')
 
 const platformRoot = path.resolve(process.env.CWI_PLATFORM_ROOT || path.resolve(__dirname, '../..'))
-const nodePath = process.env.CWI_NODE_PATH || process.execPath
+const nodePath = process.env.CWI_NODE_PATH || '/home/ubuntu/.local/bin/node'
 const backendRoot = path.join(platformRoot, 'cwi-backend')
 const publicRouter = path.join(backendRoot, 'deploy', 'cwi-public-router.mjs')
 
