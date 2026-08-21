@@ -14,9 +14,9 @@ const validStatuses = new Set(['part1_only', 'part2_refused_privacy', 'full_priv
 const validRoundtableLinkStatuses = new Set(['linked', 'standalone'])
 
 function parseLimit(value: unknown) {
-  if (typeof value !== 'string') return 50
+  if (typeof value !== 'string') return 10
   const parsed = Number(value)
-  if (!Number.isInteger(parsed)) return 50
+  if (!Number.isInteger(parsed)) return 10
   return Math.min(100, Math.max(1, parsed))
 }
 function parsePage(value: unknown) {
@@ -54,6 +54,23 @@ function parseBefore(value: unknown) {
     throw new HttpError(400, 'invalid_before_cursor', 'before must be an ISO timestamp.')
   }
   return parsed
+}
+
+function parseBeforeId(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  if (!uuidPattern.test(value)) {
+    throw new HttpError(400, 'invalid_before_cursor_id', 'beforeId must be a valid UUID.')
+  }
+  return value
+}
+
+function parseBeforeCursor(beforeValue: unknown, beforeIdValue: unknown) {
+  const before = parseBefore(beforeValue)
+  const beforeId = parseBeforeId(beforeIdValue)
+  if (beforeId && !before) {
+    throw new HttpError(400, 'invalid_before_cursor', 'beforeId requires before.')
+  }
+  return { before, beforeId }
 }
 
 function parseStatus(value: unknown) {
@@ -127,10 +144,25 @@ export function createAdminRouter(
     }
   })
 
+  router.get('/roundtable-registrations/page', async (req, res, next) => {
+    try {
+      const cursor = parseBeforeCursor(req.query.before, req.query.beforeId)
+      const data = await repository.listRoundtableRegistrationsPage({
+        ...cursor,
+        limit: parseLimit(req.query.limit),
+        linkStatus: parseRoundtableLinkStatus(req.query.linkStatus),
+        search: parseSearch(req.query.search),
+      })
+      res.json({ data })
+    } catch (error) {
+      next(error)
+    }
+  })
+
   router.get('/roundtable-registrations', async (req, res, next) => {
     try {
       const data = await repository.listRoundtableRegistrations({
-        before: parseBefore(req.query.before),
+        ...parseBeforeCursor(req.query.before, req.query.beforeId),
         limit: parseLimit(req.query.limit),
         linkStatus: parseRoundtableLinkStatus(req.query.linkStatus),
         search: parseSearch(req.query.search),
@@ -186,10 +218,26 @@ export function createAdminRouter(
     }
   })
 
+  router.get('/survey-submissions/page', async (req, res, next) => {
+    try {
+      const cursor = parseBeforeCursor(req.query.before, req.query.beforeId)
+      const data = await repository.listSubmissionsPage({
+        ...cursor,
+        limit: parseLimit(req.query.limit),
+        roundtableRegistered: parseRoundtable(req.query.roundtable),
+        search: parseSearch(req.query.search),
+        status: parseStatus(req.query.status),
+      })
+      res.json({ data })
+    } catch (error) {
+      next(error)
+    }
+  })
+
   router.get('/survey-submissions', async (req, res, next) => {
     try {
       const data = await repository.listSubmissions({
-        before: parseBefore(req.query.before),
+        ...parseBeforeCursor(req.query.before, req.query.beforeId),
         limit: parseLimit(req.query.limit),
         roundtableRegistered: parseRoundtable(req.query.roundtable),
         search: parseSearch(req.query.search),

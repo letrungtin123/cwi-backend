@@ -128,10 +128,16 @@ type RoundtableRow = {
 
 export type SubmissionListFilters = {
   before: Date | null
+  beforeId: string | null
   limit: number
   roundtableRegistered: boolean | null
   search: string | null
   status: string | null
+}
+
+export type CursorPage<T> = {
+  hasNextPage: boolean
+  items: T[]
 }
 
 export type SubmissionStats = {
@@ -177,6 +183,7 @@ export type RoundtableRegistrationDetail = RoundtableRegistrationListItem & {
 
 export type RoundtableRegistrationFilters = {
   before: Date | null
+  beforeId: string | null
   limit: number
   linkStatus: RoundtableLinkStatus | null
   search: string | null
@@ -495,9 +502,22 @@ function toNumber(value: string | null) {
 export class PgAdminRepository {
   constructor(private readonly pool: pg.Pool) {}
 
-  async listRoundtableRegistrations(filters: RoundtableRegistrationFilters): Promise<RoundtableRegistrationListItem[]> {
-    const params: unknown[] = [filters.before]
-    const where = ['($1::timestamptz IS NULL OR r.registered_at < $1::timestamptz)']
+  async listRoundtableRegistrationsPage(filters: RoundtableRegistrationFilters): Promise<CursorPage<RoundtableRegistrationListItem>> {
+    const params: unknown[] = []
+    const where: string[] = []
+
+    if (filters.before) {
+      params.push(filters.before)
+      const beforeParam = params.length
+
+      if (filters.beforeId) {
+        params.push(filters.beforeId)
+        const beforeIdParam = params.length
+        where.push('(r.registered_at, r.id) < ($' + beforeParam + '::timestamptz, $' + beforeIdParam + '::uuid)')
+      } else {
+        where.push('r.registered_at < $' + beforeParam + '::timestamptz')
+      }
+    }
 
     if (filters.linkStatus === 'linked') {
       where.push('r.submission_id IS NOT NULL')
@@ -506,29 +526,35 @@ export class PgAdminRepository {
     }
 
     if (filters.search) {
-      params.push(`%${filters.search}%`)
+      params.push('%' + filters.search + '%')
       where.push(
-        `(r.full_name ILIKE $${params.length}
-          OR r.email ILIKE $${params.length}
-          OR r.position ILIKE $${params.length}
-          OR s.full_name ILIKE $${params.length}
-          OR s.email ILIKE $${params.length}
-          OR s.position ILIKE $${params.length})`,
+        '(r.full_name ILIKE $' + params.length +
+          ' OR r.email ILIKE $' + params.length +
+          ' OR r.position ILIKE $' + params.length +
+          ' OR s.full_name ILIKE $' + params.length +
+          ' OR s.email ILIKE $' + params.length +
+          ' OR s.position ILIKE $' + params.length + ')',
       )
     }
 
-    params.push(filters.limit)
-    const result = await this.pool.query<RoundtableRegistrationRow>(
-      `
-      ${roundtableSelect}
-      WHERE ${where.join(' AND ')}
-      ORDER BY r.registered_at DESC, r.id DESC
-      LIMIT $${params.length}
-      `,
-      params,
-    )
+    params.push(filters.limit + 1)
+    const query = [
+      roundtableSelect,
+      where.length ? 'WHERE ' + where.join(' AND ') : '',
+      'ORDER BY r.registered_at DESC, r.id DESC',
+      'LIMIT $' + params.length,
+    ].join('\n')
+    const result = await this.pool.query<RoundtableRegistrationRow>(query, params)
 
-    return result.rows.map(mapRoundtableRegistration)
+    return {
+      hasNextPage: result.rows.length > filters.limit,
+      items: result.rows.slice(0, filters.limit).map(mapRoundtableRegistration),
+    }
+  }
+
+  async listRoundtableRegistrations(filters: RoundtableRegistrationFilters): Promise<RoundtableRegistrationListItem[]> {
+    const page = await this.listRoundtableRegistrationsPage(filters)
+    return page.items
   }
 
   async getRoundtableRegistrationStats(): Promise<RoundtableRegistrationStats> {
@@ -570,37 +596,60 @@ export class PgAdminRepository {
     return mapRoundtableRegistrationDetail(row)
   }
 
-  async listSubmissions(filters: SubmissionListFilters): Promise<SubmissionListItem[]> {
-    const params: unknown[] = [filters.before]
-    const where = ['($1::timestamptz IS NULL OR s.submitted_at < $1::timestamptz)']
+  async listSubmissionsPage(filters: SubmissionListFilters): Promise<CursorPage<SubmissionListItem>> {
+    const params: unknown[] = []
+    const where: string[] = []
+
+    if (filters.before) {
+      params.push(filters.before)
+      const beforeParam = params.length
+
+      if (filters.beforeId) {
+        params.push(filters.beforeId)
+        const beforeIdParam = params.length
+        where.push('(s.submitted_at, s.id) < ($' + beforeParam + '::timestamptz, $' + beforeIdParam + '::uuid)')
+      } else {
+        where.push('s.submitted_at < $' + beforeParam + '::timestamptz')
+      }
+    }
 
     if (filters.status) {
       params.push(filters.status)
-      where.push(`s.submission_status = $${params.length}`)
+      where.push('s.submission_status = $' + params.length)
     }
 
     if (filters.roundtableRegistered !== null) {
       params.push(filters.roundtableRegistered)
-      where.push(`s.roundtable_registered = $${params.length}`)
+      where.push('s.roundtable_registered = $' + params.length)
     }
 
     if (filters.search) {
-      params.push(`%${filters.search}%`)
-      where.push(`(s.full_name ILIKE $${params.length} OR s.email ILIKE $${params.length} OR s.position ILIKE $${params.length})`)
+      params.push('%' + filters.search + '%')
+      where.push(
+        '(s.full_name ILIKE $' + params.length +
+          ' OR s.email ILIKE $' + params.length +
+          ' OR s.position ILIKE $' + params.length + ')',
+      )
     }
 
-    params.push(filters.limit)
-    const result = await this.pool.query<SubmissionRow>(
-      `
-      ${submissionSelect}
-      WHERE ${where.join(' AND ')}
-      ORDER BY s.submitted_at DESC, s.id DESC
-      LIMIT $${params.length}
-      `,
-      params,
-    )
+    params.push(filters.limit + 1)
+    const query = [
+      submissionSelect,
+      where.length ? 'WHERE ' + where.join(' AND ') : '',
+      'ORDER BY s.submitted_at DESC, s.id DESC',
+      'LIMIT $' + params.length,
+    ].join('\n')
+    const result = await this.pool.query<SubmissionRow>(query, params)
 
-    return result.rows.map(mapListItem)
+    return {
+      hasNextPage: result.rows.length > filters.limit,
+      items: result.rows.slice(0, filters.limit).map(mapListItem),
+    }
+  }
+
+  async listSubmissions(filters: SubmissionListFilters): Promise<SubmissionListItem[]> {
+    const page = await this.listSubmissionsPage(filters)
+    return page.items
   }
 
   async listSubmissionDetails(filters: SubmissionDetailListFilters): Promise<SubmissionDetailListResult> {
