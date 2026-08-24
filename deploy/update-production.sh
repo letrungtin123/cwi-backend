@@ -37,6 +37,7 @@ cleanup() {
         git -C "${platform_root}/${app}" worktree remove --force "${release_dir}/${app}" >/dev/null 2>&1 || true
       fi
     done
+    rm -f "${release_dir}/backend-smoke.log" "${release_dir}/public-smoke.log"
     rmdir "${release_dir}" >/dev/null 2>&1 || true
   fi
 }
@@ -97,16 +98,23 @@ wait_for_url() {
   return 1
 }
 
+start_release() {
+  local root="$1"
+  CWI_PLATFORM_ROOT="${root}" \
+  CWI_NODE_ENV="${CWI_NODE_ENV}" \
+  CWI_PUBLIC_ORIGIN="${CWI_PUBLIC_ORIGIN}" \
+  pm2 start \
+    "${root}/cwi-backend/deploy/ecosystem.config.cjs" \
+    --env production \
+    --update-env
+}
+
 rollback_pm2() {
   if [[ "${rollout_started}" != '1' ]]; then return 0; fi
   echo "Health check failed; attempting PM2 rollback to ${previous_release}" >&2
-  CWI_PLATFORM_ROOT="${previous_release}" \
-  CWI_NODE_ENV="${CWI_NODE_ENV}" \
-  CWI_PUBLIC_ORIGIN="${CWI_PUBLIC_ORIGIN}" \
-  pm2 startOrReload \
-    "${previous_release}/cwi-backend/deploy/ecosystem.config.cjs" \
-    --env production \
-    --update-env >/dev/null
+  pm2 delete cwi-backend >/dev/null 2>&1 || true
+  pm2 delete cwi-public >/dev/null 2>&1 || true
+  start_release "${previous_release}"
   pm2 save >/dev/null
 }
 
@@ -189,13 +197,11 @@ wait "${public_pid}" >/dev/null 2>&1 || true
 public_pid=""
 
 rollout_started=1
-CWI_PLATFORM_ROOT="${release_dir}" \
-CWI_NODE_ENV="${CWI_NODE_ENV}" \
-CWI_PUBLIC_ORIGIN="${CWI_PUBLIC_ORIGIN}" \
-pm2 startOrReload \
-  "${release_dir}/cwi-backend/deploy/ecosystem.config.cjs" \
-  --env production \
-  --update-env
+pm2 stop cwi-backend >/dev/null 2>&1 || true
+pm2 stop cwi-public >/dev/null 2>&1 || true
+pm2 delete cwi-backend >/dev/null 2>&1 || true
+pm2 delete cwi-public >/dev/null 2>&1 || true
+start_release "${release_dir}"
 pm2 save
 
 if ! wait_for_url http://127.0.0.1:8088/healthz 30 || ! wait_for_url http://127.0.0.1:8088/readyz 30 || ! wait_for_url http://127.0.0.1:8080/ 30 || ! wait_for_url http://127.0.0.1:8080/dashboard/ 30; then
