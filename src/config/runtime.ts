@@ -14,6 +14,7 @@ export type AuthConfig = {
 }
 
 export type RuntimeConfig = {
+  adminCursorSecret: string
   auth: AuthConfig
   corsAllowedOrigins: string[]
   ipHashSecret: string

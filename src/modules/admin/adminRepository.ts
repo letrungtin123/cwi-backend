@@ -1,4 +1,5 @@
 import type pg from 'pg'
+import { encodeCursor } from '../../http/cursor.js'
 import { HttpError } from '../../http/errors.js'
 
 export type ReportSummary = {
@@ -16,14 +17,12 @@ export type SubmissionListItem = {
   email: string
   fullName: string
   id: string
-  overallScore: number
   part1Completed: boolean
   part2Completed: boolean
   position: string
   privacyConsent: string
   report: ReportSummary
   roundtableRegistered: boolean
-  scaleScore: number
   statusNote: string
   submittedAt: string
   submissionStatus: string
@@ -39,9 +38,6 @@ export type SubmissionDetail = SubmissionListItem & {
     questionText: string
     questionType: string
   }>
-  clientMeta: Record<string, unknown>
-  domainScores: unknown
-  overallScore: number
   roundtableRegistration: {
     email: string
     fullName: string
@@ -49,21 +45,9 @@ export type SubmissionDetail = SubmissionListItem & {
     position: string | null
     registeredAt: string
   } | null
-  scaleScore: number
-  source: string
 }
-export type SubmissionFullItem = Pick<
-  SubmissionListItem,
-  | 'answersCount'
-  | 'email'
-  | 'fullName'
-  | 'id'
-  | 'part1Completed'
-  | 'part2Completed'
-  | 'roundtableRegistered'
-  | 'statusNote'
-  | 'submittedAt'
-> & {
+
+export type SubmissionFullItem = SubmissionListItem & {
   answers: SubmissionDetail['answers']
   roundtableRegistration: SubmissionDetail['roundtableRegistration']
 }
@@ -83,12 +67,9 @@ export type SubmissionDetailListResult = {
 
 type SubmissionRow = {
   answers_count: number
-  client_meta: Record<string, unknown>
-  domain_scores: unknown
   email: string
   full_name: string
   id: string
-  overall_score: number
   part1_completed: boolean
   part2_completed: boolean
   position: string
@@ -99,8 +80,6 @@ type SubmissionRow = {
   report_status: string | null
   report_updated_at: Date | null
   roundtable_registered: boolean
-  scale_score: number
-  source: string
   status_note: string
   submitted_at: Date
   submission_status: string
@@ -138,11 +117,10 @@ export type SubmissionListFilters = {
 export type CursorPage<T> = {
   hasNextPage: boolean
   items: T[]
+  nextCursor: string | null
 }
 
 export type SubmissionStats = {
-  averageOverallScore: number
-  averageScaleScore: number
   fullPrivateReport: number
   part1Only: number
   part2RefusedPrivacy: number
@@ -197,8 +175,6 @@ export type RoundtableRegistrationStats = {
 }
 
 type StatsRow = {
-  average_overall_score: string | null
-  average_scale_score: string | null
   full_private_report: string
   part1_only: string
   part2_refused_privacy: string
@@ -239,6 +215,13 @@ type RoundtableStatsRow = {
   total_registrations: string
 }
 
+type TimedCache<T> = {
+  expiresAt: number
+  value: T
+}
+
+const statsCacheTtlMs = 10_000
+
 const submissionSelect = `
   SELECT
     s.id,
@@ -252,11 +235,6 @@ const submissionSelect = `
     s.part2_completed,
     s.answers_count,
     s.roundtable_registered,
-    s.overall_score,
-    s.scale_score,
-    s.domain_scores,
-    s.source,
-    s.client_meta,
     s.submitted_at,
     report.id AS report_job_id,
     report.status AS report_status,
@@ -326,7 +304,7 @@ function mapReportSummary(row: SubmissionRow): ReportSummary {
     }
   }
 
-  if (row.report_status === 'completed') {
+  if (row.report_status === 'completed' || row.report_status === 'sent') {
     const pdfAvailable = Boolean(row.report_pdf_storage_path)
     return {
       errorMessage: null,
@@ -380,14 +358,12 @@ function mapListItem(row: SubmissionRow): SubmissionListItem {
     email: row.email,
     fullName: row.full_name,
     id: row.id,
-    overallScore: row.overall_score,
     part1Completed: row.part1_completed,
     part2Completed: row.part2_completed,
     position: row.position,
     privacyConsent: row.privacy_consent,
     report: mapReportSummary(row),
     roundtableRegistered: row.roundtable_registered,
-    scaleScore: row.scale_score,
     statusNote: row.status_note,
     submittedAt: toIso(row.submitted_at),
     submissionStatus: row.submission_status,
@@ -407,7 +383,7 @@ function mapRoundtableReportSummary(row: RoundtableRegistrationRow): ReportSumma
     }
   }
 
-  if (row.report_status === 'completed') {
+  if (row.report_status === 'completed' || row.report_status === 'sent') {
     const pdfAvailable = Boolean(row.report_pdf_storage_path)
     return {
       errorMessage: null,
@@ -500,7 +476,17 @@ function toNumber(value: string | null) {
 }
 
 export class PgAdminRepository {
-  constructor(private readonly pool: pg.Pool) {}
+  private roundtableStatsCache: TimedCache<RoundtableRegistrationStats> | null = null
+  private submissionStatsCache: TimedCache<SubmissionStats> | null = null
+
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly cursorSecret: string,
+  ) {}
+
+  private nextCursor(timestamp: Date, id: string) {
+    return encodeCursor(this.cursorSecret, { id, timestamp })
+  }
 
   async listRoundtableRegistrationsPage(filters: RoundtableRegistrationFilters): Promise<CursorPage<RoundtableRegistrationListItem>> {
     const params: unknown[] = []
@@ -545,10 +531,14 @@ export class PgAdminRepository {
       'LIMIT $' + params.length,
     ].join('\n')
     const result = await this.pool.query<RoundtableRegistrationRow>(query, params)
+    const hasNextPage = result.rows.length > filters.limit
+    const rows = result.rows.slice(0, filters.limit)
+    const lastRow = rows.at(-1)
 
     return {
-      hasNextPage: result.rows.length > filters.limit,
-      items: result.rows.slice(0, filters.limit).map(mapRoundtableRegistration),
+      hasNextPage,
+      items: rows.map(mapRoundtableRegistration),
+      nextCursor: hasNextPage && lastRow ? this.nextCursor(lastRow.registered_at, lastRow.id) : null,
     }
   }
 
@@ -558,6 +548,8 @@ export class PgAdminRepository {
   }
 
   async getRoundtableRegistrationStats(): Promise<RoundtableRegistrationStats> {
+    if (this.roundtableStatsCache && this.roundtableStatsCache.expiresAt > Date.now()) return this.roundtableStatsCache.value
+
     const result = await this.pool.query<RoundtableStatsRow>(
       `
       SELECT
@@ -570,12 +562,14 @@ export class PgAdminRepository {
     )
 
     const row = result.rows[0]
-    return {
+    const value = {
       linkedSubmissions: toNumber(row?.linked_submissions ?? null),
       standaloneRegistrations: toNumber(row?.standalone_registrations ?? null),
       todayRegistrations: toNumber(row?.today_registrations ?? null),
       totalRegistrations: toNumber(row?.total_registrations ?? null),
     }
+    this.roundtableStatsCache = { expiresAt: Date.now() + statsCacheTtlMs, value }
+    return value
   }
 
   async getRoundtableRegistration(id: string): Promise<RoundtableRegistrationDetail> {
@@ -640,10 +634,14 @@ export class PgAdminRepository {
       'LIMIT $' + params.length,
     ].join('\n')
     const result = await this.pool.query<SubmissionRow>(query, params)
+    const hasNextPage = result.rows.length > filters.limit
+    const rows = result.rows.slice(0, filters.limit)
+    const lastRow = rows.at(-1)
 
     return {
-      hasNextPage: result.rows.length > filters.limit,
-      items: result.rows.slice(0, filters.limit).map(mapListItem),
+      hasNextPage,
+      items: rows.map(mapListItem),
+      nextCursor: hasNextPage && lastRow ? this.nextCursor(lastRow.submitted_at, lastRow.id) : null,
     }
   }
 
@@ -745,33 +743,9 @@ export class PgAdminRepository {
 
     return {
       items: rows.map((row) => {
-        const listItem = mapListItem(row)
-        const listItemForFullResponse: Pick<
-          SubmissionListItem,
-          | 'answersCount'
-          | 'email'
-          | 'fullName'
-          | 'id'
-          | 'part1Completed'
-          | 'part2Completed'
-          | 'roundtableRegistered'
-          | 'statusNote'
-          | 'submittedAt'
-        > = {
-          answersCount: listItem.answersCount,
-          email: listItem.email,
-          fullName: listItem.fullName,
-          id: listItem.id,
-          part1Completed: listItem.part1Completed,
-          part2Completed: listItem.part2Completed,
-          roundtableRegistered: listItem.roundtableRegistered,
-          statusNote: listItem.statusNote,
-          submittedAt: listItem.submittedAt,
-        }
         const roundtable = roundtableBySubmission.get(row.id)
-
         return {
-          ...listItemForFullResponse,
+          ...mapListItem(row),
           answers: (answersBySubmission.get(row.id) ?? []).map((answer) => ({
             answerText: answer.answer_text,
             answerValue: answer.answer_value,
@@ -795,7 +769,10 @@ export class PgAdminRepository {
       totalItems,
     }
   }
+
   async getSubmissionStats(): Promise<SubmissionStats> {
+    if (this.submissionStatsCache && this.submissionStatsCache.expiresAt > Date.now()) return this.submissionStatsCache.value
+
     const result = await this.pool.query<StatsRow>(
       `
       SELECT
@@ -803,23 +780,21 @@ export class PgAdminRepository {
         count(*) FILTER (WHERE submission_status = 'part1_only')::text AS part1_only,
         count(*) FILTER (WHERE submission_status = 'part2_refused_privacy')::text AS part2_refused_privacy,
         count(*) FILTER (WHERE submission_status = 'full_private_report')::text AS full_private_report,
-        count(*) FILTER (WHERE roundtable_registered = true)::text AS roundtable_registered,
-        round(avg(overall_score), 1)::text AS average_overall_score,
-        round(avg(scale_score), 1)::text AS average_scale_score
+        count(*) FILTER (WHERE roundtable_registered = true)::text AS roundtable_registered
       FROM public.cwi_survey_submissions
       `,
     )
 
     const row = result.rows[0]
-    return {
-      averageOverallScore: toNumber(row?.average_overall_score ?? null),
-      averageScaleScore: toNumber(row?.average_scale_score ?? null),
+    const value = {
       fullPrivateReport: toNumber(row?.full_private_report ?? null),
       part1Only: toNumber(row?.part1_only ?? null),
       part2RefusedPrivacy: toNumber(row?.part2_refused_privacy ?? null),
       roundtableRegistered: toNumber(row?.roundtable_registered ?? null),
       totalSubmissions: toNumber(row?.total_submissions ?? null),
     }
+    this.submissionStatsCache = { expiresAt: Date.now() + statsCacheTtlMs, value }
+    return value
   }
 
   async getSubmission(id: string): Promise<SubmissionDetail> {
@@ -868,9 +843,6 @@ export class PgAdminRepository {
         questionText: answer.question_text,
         questionType: answer.question_type,
       })),
-      clientMeta: row.client_meta,
-      domainScores: row.domain_scores,
-      overallScore: row.overall_score,
       roundtableRegistration: roundtableResult.rows[0]
         ? {
             email: roundtableResult.rows[0].email,
@@ -880,8 +852,6 @@ export class PgAdminRepository {
             registeredAt: toIso(roundtableResult.rows[0].registered_at),
           }
         : null,
-      scaleScore: row.scale_score,
-      source: row.source,
     }
   }
 }

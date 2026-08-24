@@ -2,6 +2,7 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { Router } from 'express'
 import type { RuntimeConfig } from '../../config/runtime.js'
+import { decodeCursor } from '../../http/cursor.js'
 import { requireAdminSession } from '../../http/adminSession.js'
 import { HttpError } from '../../http/errors.js'
 import type { AuthService } from '../auth/authService.js'
@@ -14,26 +15,6 @@ const validStatuses = new Set(['part1_only', 'part2_refused_privacy', 'full_priv
 const validRoundtableLinkStatuses = new Set(['linked', 'standalone'])
 
 function parseLimit(value: unknown) {
-  if (typeof value !== 'string') return 10
-  const parsed = Number(value)
-  if (!Number.isInteger(parsed)) return 10
-  return Math.min(100, Math.max(1, parsed))
-}
-function parsePage(value: unknown) {
-  if (value === undefined) return 1
-  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
-    throw new HttpError(400, 'invalid_page', 'page must be a positive integer.')
-  }
-
-  const parsed = Number(value)
-  if (!Number.isSafeInteger(parsed) || parsed > 100_000) {
-    throw new HttpError(400, 'invalid_page', 'page must be between 1 and 100000.')
-  }
-
-  return parsed
-}
-
-function parseFullListLimit(value: unknown) {
   if (value === undefined) return 10
   if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
     throw new HttpError(400, 'invalid_limit', 'limit must be a positive integer.')
@@ -42,6 +23,20 @@ function parseFullListLimit(value: unknown) {
   const parsed = Number(value)
   if (!Number.isSafeInteger(parsed) || parsed > 100) {
     throw new HttpError(400, 'invalid_limit', 'limit must be between 1 and 100.')
+  }
+
+  return parsed
+}
+
+function parsePage(value: unknown) {
+  if (value === undefined) return 1
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
+    throw new HttpError(400, 'invalid_page', 'page must be a positive integer.')
+  }
+
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed > 10_000) {
+    throw new HttpError(400, 'invalid_page', 'page must be between 1 and 10000.')
   }
 
   return parsed
@@ -71,6 +66,17 @@ function parseBeforeCursor(beforeValue: unknown, beforeIdValue: unknown) {
     throw new HttpError(400, 'invalid_before_cursor', 'beforeId requires before.')
   }
   return { before, beforeId }
+}
+
+function parsePaginationCursor(cursorValue: unknown, beforeValue: unknown, beforeIdValue: unknown, secret: string) {
+  if (cursorValue !== undefined) {
+    if (beforeValue !== undefined || beforeIdValue !== undefined) {
+      throw new HttpError(400, 'ambiguous_cursor', 'Use cursor or before/beforeId, not both.')
+    }
+    return decodeCursor(secret, cursorValue)
+  }
+
+  return parseBeforeCursor(beforeValue, beforeIdValue)
 }
 
 function parseStatus(value: unknown) {
@@ -146,7 +152,7 @@ export function createAdminRouter(
 
   router.get('/roundtable-registrations/page', async (req, res, next) => {
     try {
-      const cursor = parseBeforeCursor(req.query.before, req.query.beforeId)
+      const cursor = parsePaginationCursor(req.query.cursor, req.query.before, req.query.beforeId, config.adminCursorSecret)
       const data = await repository.listRoundtableRegistrationsPage({
         ...cursor,
         limit: parseLimit(req.query.limit),
@@ -162,7 +168,7 @@ export function createAdminRouter(
   router.get('/roundtable-registrations', async (req, res, next) => {
     try {
       const data = await repository.listRoundtableRegistrations({
-        ...parseBeforeCursor(req.query.before, req.query.beforeId),
+        ...parsePaginationCursor(req.query.cursor, req.query.before, req.query.beforeId, config.adminCursorSecret),
         limit: parseLimit(req.query.limit),
         linkStatus: parseRoundtableLinkStatus(req.query.linkStatus),
         search: parseSearch(req.query.search),
@@ -220,7 +226,7 @@ export function createAdminRouter(
 
   router.get('/survey-submissions/page', async (req, res, next) => {
     try {
-      const cursor = parseBeforeCursor(req.query.before, req.query.beforeId)
+      const cursor = parsePaginationCursor(req.query.cursor, req.query.before, req.query.beforeId, config.adminCursorSecret)
       const data = await repository.listSubmissionsPage({
         ...cursor,
         limit: parseLimit(req.query.limit),
@@ -237,7 +243,7 @@ export function createAdminRouter(
   router.get('/survey-submissions', async (req, res, next) => {
     try {
       const data = await repository.listSubmissions({
-        ...parseBeforeCursor(req.query.before, req.query.beforeId),
+        ...parsePaginationCursor(req.query.cursor, req.query.before, req.query.beforeId, config.adminCursorSecret),
         limit: parseLimit(req.query.limit),
         roundtableRegistered: parseRoundtable(req.query.roundtable),
         search: parseSearch(req.query.search),
@@ -252,7 +258,7 @@ export function createAdminRouter(
   router.get('/survey-submissions/full', async (req, res, next) => {
     try {
       const page = parsePage(req.query.page)
-      const limit = parseFullListLimit(req.query.limit)
+      const limit = parseLimit(req.query.limit)
       const result = await repository.listSubmissionDetails({
         limit,
         page,
@@ -262,21 +268,25 @@ export function createAdminRouter(
       })
       const totalPages = result.totalItems === 0 ? 0 : Math.ceil(result.totalItems / limit)
 
+      res.setHeader('X-API-Deprecated', 'Use /survey-submissions/page and /survey-submissions/:id instead.')
       res.json({
-        data: result.items,
-        pagination: {
-          hasNextPage: page < totalPages,
-          hasPreviousPage: page > 1 && totalPages > 0,
-          limit,
-          page,
-          totalItems: result.totalItems,
-          totalPages,
+        data: {
+          items: result.items,
+          pagination: {
+            hasNextPage: page < totalPages,
+            hasPreviousPage: page > 1 && totalPages > 0,
+            limit,
+            page,
+            totalItems: result.totalItems,
+            totalPages,
+          },
         },
       })
     } catch (error) {
       next(error)
     }
   })
+
   router.get('/survey-submissions/:id', async (req, res, next) => {
     try {
       const id = assertUuid(req.params.id, 'invalid_submission_id', 'Submission id must be a UUID.')

@@ -31,6 +31,7 @@ const bucketNameSchema = z
 
 const envSchema = z
   .object({
+    ADMIN_CURSOR_SECRET: z.string().optional(),
     AUTH_COOKIE_DOMAIN: z.string().optional(),
     AUTH_COOKIE_SAME_SITE: z.enum(['lax', 'none', 'strict']).default('lax'),
     AUTH_COOKIE_SECURE: booleanSchema.default(false),
@@ -166,6 +167,7 @@ function splitOrigins(value: string | undefined) {
 }
 
 export const env = {
+  adminCursorSecret: parsed.data.ADMIN_CURSOR_SECRET ?? parsed.data.IP_HASH_SECRET ?? 'development-only-admin-cursor-secret',
   authCookieDomain: parsed.data.AUTH_COOKIE_DOMAIN ?? null,
   authCookieSameSite: parsed.data.AUTH_COOKIE_SAME_SITE,
   authCookieSecure: parsed.data.AUTH_COOKIE_SECURE,

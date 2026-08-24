@@ -3,11 +3,12 @@ import { Router } from 'express'
 import { z } from 'zod'
 import type { RuntimeConfig } from '../../config/runtime.js'
 import { getAuthRequestMeta, getRequiredAdminSession, requireAdminSession } from '../../http/adminSession.js'
+import { HttpError } from '../../http/errors.js'
 import type { AuthService } from './authService.js'
 import { clearAuthCookies, setAuthCookies } from './cookies.js'
 
 const loginSchema = z.object({
-  email: z.string().email().max(254),
+  email: z.string().trim().email().max(254),
   password: z.string().min(1).max(512),
 })
 
@@ -25,8 +26,12 @@ export function createAuthRouter(authService: AuthService, config: RuntimeConfig
     }),
     async (req, res, next) => {
       try {
-        const input = loginSchema.parse(req.body)
-        const result = await authService.login(input, getAuthRequestMeta(req, config))
+        const parsed = loginSchema.safeParse(req.body)
+        if (!parsed.success) {
+          throw new HttpError(400, 'invalid_login_payload', 'Email hoặc mật khẩu không hợp lệ.')
+        }
+
+        const result = await authService.login(parsed.data, getAuthRequestMeta(req, config))
         setAuthCookies(res, config.auth, result.sessionToken, result.csrfToken, result.expiresAt)
         res.json({
           data: {

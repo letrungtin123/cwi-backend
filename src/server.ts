@@ -23,6 +23,7 @@ const pool = createDbPool({
 })
 
 const config: RuntimeConfig = {
+  adminCursorSecret: env.adminCursorSecret,
   auth: {
     cookieDomain: env.authCookieDomain,
     cookieSameSite: env.authCookieSameSite,
@@ -46,7 +47,7 @@ const config: RuntimeConfig = {
 
 const surveyRepository = new PgSurveyRepository(pool)
 const roundtableRepository = new PgRoundtableRepository(pool)
-const adminRepository = new PgAdminRepository(pool)
+const adminRepository = new PgAdminRepository(pool, config.adminCursorSecret)
 const reportRepository = new PgReportRepository(pool)
 const authRepository = new PgAuthRepository(pool)
 const authService = new AuthService(authRepository, config.auth)
@@ -60,7 +61,7 @@ const reportAssetStorage = new ReportAssetStorage({
 // Temporarily disabled: do not enqueue or call the cwi-ai report service.
 const surveyService = new SurveyService(surveyRepository)
 const roundtableService = new RoundtableService(roundtableRepository)
-const app = createApp({ adminRepository, authService, config, logger, reportAssetStorage, reportRepository, roundtableService, surveyService })
+const app = createApp({ adminRepository, authService, config, logger, pool, reportAssetStorage, reportRepository, roundtableService, surveyService })
 
 const server = app.listen(env.port, env.host, () => {
   logger.info({ host: env.host, port: env.port }, 'CWI backend listening')

@@ -6,6 +6,8 @@ import rateLimit from 'express-rate-limit'
 import helmet from 'helmet'
 import type { Logger } from 'pino'
 import pinoHttpImport from 'pino-http'
+import type pg from 'pg'
+import { z } from 'zod'
 import type { RuntimeConfig } from './config/runtime.js'
 import { HttpError, isHttpError } from './http/errors.js'
 import { createAdminRouter } from './modules/admin/adminRoutes.js'
@@ -24,6 +26,7 @@ export type AppDependencies = {
   authService: AuthService
   config: RuntimeConfig
   logger: Logger
+  pool: pg.Pool
   reportAssetStorage: ReportAssetStorage
   reportRepository: PgReportRepository
   roundtableService: RoundtableService
@@ -59,14 +62,35 @@ function handleNotFound(_req: Request, _res: Response, next: NextFunction) {
   next(new HttpError(404, 'not_found', 'Route not found.'))
 }
 
+function requestBodyError(error: unknown) {
+  if (error instanceof z.ZodError) {
+    return new HttpError(400, 'invalid_request', 'Request payload is invalid.', {
+      issues: error.issues.map((issue) => ({ code: issue.code, message: issue.message, path: issue.path })),
+    })
+  }
+
+  if (error instanceof SyntaxError && (error as SyntaxError & { type?: string }).type === 'entity.parse.failed') {
+    return new HttpError(400, 'invalid_json', 'Request body contains invalid JSON.')
+  }
+
+  if (typeof error === 'object' && error !== null && 'type' in error && error.type === 'entity.too.large') {
+    return new HttpError(413, 'request_too_large', 'Request body is too large.')
+  }
+
+  return null
+}
+
 function handleError(logger: Logger) {
   return (error: unknown, req: Request, res: Response, _next: NextFunction) => {
-    if (isHttpError(error)) {
-      res.status(error.statusCode).json({
+    const normalizedError = requestBodyError(error)
+    const safeError = normalizedError ?? error
+
+    if (isHttpError(safeError)) {
+      res.status(safeError.statusCode).json({
         error: {
-          code: error.code,
-          details: error.details,
-          message: error.message,
+          code: safeError.code,
+          details: safeError.details,
+          message: safeError.message,
           requestId: req.id,
         },
       })
@@ -84,8 +108,12 @@ function handleError(logger: Logger) {
   }
 }
 
+function noStore(res: Response) {
+  res.setHeader('Cache-Control', 'no-store')
+}
+
 export function createApp(dependencies: AppDependencies) {
-  const { adminRepository, authService, config, logger, reportAssetStorage, reportRepository, roundtableService, surveyService } = dependencies
+  const { adminRepository, authService, config, logger, pool, reportAssetStorage, reportRepository, roundtableService, surveyService } = dependencies
   const app = express()
 
   app.disable('x-powered-by')
@@ -111,13 +139,31 @@ export function createApp(dependencies: AppDependencies) {
   )
   app.use(express.json({ limit: config.requestBodyLimit }))
 
-  app.get('/health', (_req, res) => {
+  const liveness = (_req: Request, res: Response) => {
+    noStore(res)
     res.json({
       data: {
         service: 'cwi-backend',
         status: 'ok',
       },
     })
+  }
+
+  app.get('/health', liveness)
+  app.get('/healthz', liveness)
+  app.get('/readyz', async (_req, res, next) => {
+    try {
+      await pool.query('SELECT 1')
+      noStore(res)
+      res.json({
+        data: {
+          service: 'cwi-backend',
+          status: 'ready',
+        },
+      })
+    } catch {
+      next(new HttpError(503, 'not_ready', 'Service dependencies are not ready.'))
+    }
   })
 
   app.use('/api/v1/auth', createAuthRouter(authService, config))
