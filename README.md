@@ -40,7 +40,7 @@ Admin dashboard API:
 
 Admin list endpoints default to `limit=10` and accept a signed opaque `cursor`. The legacy `before`/`beforeId` pair remains supported during client migration. `limit` must be an integer from 1 to 100; invalid values return `400`.
 
-`GET /api/v1/admin/survey-submissions/full` remains available for compatibility but is deprecated. Use the paginated list endpoint and fetch one detail record by ID instead of loading answer arrays for many users in one request.
+`GET /api/v1/admin/survey-submissions/full` remains available for compatibility but is deprecated. Its `limit` defaults to 10 and is hard-capped at 10 because each item includes the full answer array. Values above 10 return `400` before any database query. Use the paginated list endpoint and fetch one detail record by ID instead of loading answer arrays for many users in one request.
 
 The submission list/detail response does not expose internal score columns, source, domain scores, or client metadata. PDF responses are authenticated streams from private storage and never expose absolute storage URLs.
 
@@ -87,7 +87,7 @@ The backend stores canonical question text from `src/modules/survey/surveyQuesti
 
 ## Production Deployment
 
-`deploy/update-production.sh` fetches `origin/main`, creates isolated Git worktrees, installs/builds all three applications, runs liveness/readiness and static smoke checks, then uses `pm2 startOrReload`. It keeps the previous release available for rollback and never runs database migrations during a code deploy.
+`deploy/update-production.sh` fetches `origin/main`, creates isolated Git worktrees, installs/builds all three applications, runs liveness/readiness and static smoke checks, then replaces the PM2 processes with the staged release. It keeps the previous release available for rollback and never runs database migrations during a code deploy.
 
 ## Supabase
 

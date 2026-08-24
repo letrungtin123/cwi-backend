@@ -28,6 +28,15 @@ function parseLimit(value: unknown) {
   return parsed
 }
 
+export function parseFullSubmissionLimit(value: unknown) {
+  const parsed = parseLimit(value)
+  if (parsed > 10) {
+    throw new HttpError(400, 'invalid_limit', 'limit must be between 1 and 10 for the full submissions endpoint.')
+  }
+
+  return parsed
+}
+
 function parsePage(value: unknown) {
   if (value === undefined) return 1
   if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
@@ -127,7 +136,7 @@ function reportStorageErrorToHttp(error: ReportAssetStorageError): HttpError {
 
 function contentDisposition(value: unknown) {
   const mode = value === '1' || value === 'true' ? 'attachment' : 'inline'
-  return `${mode}; filename="cwi-report.pdf"`
+  return mode + '; filename="cwi-report.pdf"'
 }
 
 export function createAdminRouter(
@@ -258,7 +267,7 @@ export function createAdminRouter(
   router.get('/survey-submissions/full', async (req, res, next) => {
     try {
       const page = parsePage(req.query.page)
-      const limit = parseLimit(req.query.limit)
+      const limit = parseFullSubmissionLimit(req.query.limit)
       const result = await repository.listSubmissionDetails({
         limit,
         page,
