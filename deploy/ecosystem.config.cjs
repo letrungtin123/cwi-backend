@@ -19,19 +19,22 @@ module.exports = {
       cwd: backendRoot,
       script: 'deploy/start-backend.mjs',
       interpreter: nodePath,
-      env: {
-        NODE_ENV: nodeEnv,
-        HOST: '127.0.0.1',
-        PORT: '8088',
-      },
-      env_production: {
-        NODE_ENV: 'production',
-        HOST: '127.0.0.1',
-        PORT: '8088',
-        ...productionBackendEnv,
-      },
+      env: { NODE_ENV: nodeEnv, HOST: '127.0.0.1', PORT: '8088' },
+      env_production: { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '8088', ...productionBackendEnv },
       autorestart: true,
       max_memory_restart: '512M',
+      exp_backoff_restart_delay: 100,
+      max_restarts: 10,
+    },
+    {
+      name: 'cwi-export-worker',
+      cwd: backendRoot,
+      script: 'deploy/start-export-worker.mjs',
+      interpreter: nodePath,
+      env: { NODE_ENV: nodeEnv },
+      env_production: { NODE_ENV: 'production', ...productionBackendEnv },
+      autorestart: true,
+      max_memory_restart: '768M',
       exp_backoff_restart_delay: 100,
       max_restarts: 10,
     },
@@ -40,13 +43,12 @@ module.exports = {
       cwd: platformRoot,
       script: publicRouter,
       interpreter: nodePath,
-      args: `--landing-root ${path.join(platformRoot, 'source4', 'dist')} --dashboard-root ${path.join(platformRoot, 'cwi-dashboard', 'dist')} --port 8080 --host 0.0.0.0 --api http://127.0.0.1:8088`,
-      env: {
-        NODE_ENV: nodeEnv,
-      },
-      env_production: {
-        NODE_ENV: 'production',
-      },
+      args:
+        '--landing-root ' + path.join(platformRoot, 'source4', 'dist') +
+        ' --dashboard-root ' + path.join(platformRoot, 'cwi-dashboard', 'dist') +
+        ' --port 8080 --host 0.0.0.0 --api http://127.0.0.1:8088',
+      env: { NODE_ENV: nodeEnv },
+      env_production: { NODE_ENV: 'production' },
       autorestart: true,
       max_memory_restart: '256M',
       exp_backoff_restart_delay: 100,

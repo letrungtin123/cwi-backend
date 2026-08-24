@@ -14,24 +14,14 @@ const nullablePathSchema = z.preprocess((value) => {
   return trimmed ? trimmed : undefined
 }, z.string().optional())
 
-const phonePlaceholderSchema = z
-  .string()
-  .trim()
-  .min(6)
-  .max(32)
-  .regex(/^[0-9+().\-\s]+$/)
-  .default('00000000')
+const phonePlaceholderSchema = z.string().trim().min(6).max(32).regex(/^[0-9+().\-\s]+$/).default('00000000')
 
-const bucketNameSchema = z
-  .string()
-  .trim()
-  .min(3)
-  .max(63)
-  .regex(/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/)
+const bucketNameSchema = z.string().trim().min(3).max(63).regex(/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/)
 
 const envSchema = z
   .object({
     ADMIN_CURSOR_SECRET: z.string().optional(),
+    ADMIN_EXPORT_ENABLED: booleanSchema.default(false),
     AUTH_COOKIE_DOMAIN: z.string().optional(),
     AUTH_COOKIE_SAME_SITE: z.enum(['lax', 'none', 'strict']).default('lax'),
     AUTH_COOKIE_SECURE: booleanSchema.default(false),
@@ -46,6 +36,9 @@ const envSchema = z
     DB_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
     DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(10),
     DB_SSL: booleanSchema.default(false),
+    EXPORT_WORKER_LOCK_MS: z.coerce.number().int().min(30000).max(1800000).default(300000),
+    EXPORT_WORKER_LOOP_INTERVAL_MS: z.coerce.number().int().min(500).max(60000).default(2000),
+    EXPORT_WORKER_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
     HOST: z.string().trim().min(1).default('0.0.0.0'),
     IP_HASH_SECRET: z.string().optional(),
     LOG_LEVEL: z.string().default('info'),
@@ -76,98 +69,51 @@ const envSchema = z
   })
   .superRefine((value, ctx) => {
     if (value.NODE_ENV !== 'test' && !value.DATABASE_URL) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'DATABASE_URL is required outside test',
-        path: ['DATABASE_URL'],
-      })
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'DATABASE_URL is required outside test', path: ['DATABASE_URL'] })
     }
-
     if (value.NODE_ENV === 'production') {
       if (!value.IP_HASH_SECRET || value.IP_HASH_SECRET.length < 32) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'IP_HASH_SECRET must be at least 32 characters in production',
-          path: ['IP_HASH_SECRET'],
-        })
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'IP_HASH_SECRET must be at least 32 characters in production', path: ['IP_HASH_SECRET'] })
       }
-
       if (!value.CORS_ALLOWED_ORIGINS?.trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'CORS_ALLOWED_ORIGINS is required in production',
-          path: ['CORS_ALLOWED_ORIGINS'],
-        })
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'CORS_ALLOWED_ORIGINS is required in production', path: ['CORS_ALLOWED_ORIGINS'] })
       }
-
       if (!value.SUPABASE_AUTH_URL) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'SUPABASE_AUTH_URL is required in production',
-          path: ['SUPABASE_AUTH_URL'],
-        })
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SUPABASE_AUTH_URL is required in production', path: ['SUPABASE_AUTH_URL'] })
       }
-
       if (!value.SUPABASE_ANON_KEY || value.SUPABASE_ANON_KEY.length < 32) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'SUPABASE_ANON_KEY is required in production',
-          path: ['SUPABASE_ANON_KEY'],
-        })
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SUPABASE_ANON_KEY is required in production', path: ['SUPABASE_ANON_KEY'] })
       }
-
       if (!value.AUTH_COOKIE_SECURE) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'AUTH_COOKIE_SECURE must be true in production',
-          path: ['AUTH_COOKIE_SECURE'],
-        })
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'AUTH_COOKIE_SECURE must be true in production', path: ['AUTH_COOKIE_SECURE'] })
       }
     }
-
     if (value.REPORT_SERVICE_ENABLED) {
       if (!value.SUPABASE_SERVICE_ROLE_KEY || value.SUPABASE_SERVICE_ROLE_KEY.length < 32) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'SUPABASE_SERVICE_ROLE_KEY is required when REPORT_SERVICE_ENABLED is true',
-          path: ['SUPABASE_SERVICE_ROLE_KEY'],
-        })
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SUPABASE_SERVICE_ROLE_KEY is required when REPORT_SERVICE_ENABLED is true', path: ['SUPABASE_SERVICE_ROLE_KEY'] })
       }
-
       if (value.NODE_ENV === 'production' && !process.env.SUPABASE_STORAGE_URL?.trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'SUPABASE_STORAGE_URL must be set explicitly in production when report generation is enabled',
-          path: ['SUPABASE_STORAGE_URL'],
-        })
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SUPABASE_STORAGE_URL must be set explicitly in production when report generation is enabled', path: ['SUPABASE_STORAGE_URL'] })
       }
     }
-
     if (value.AUTH_COOKIE_SAME_SITE === 'none' && !value.AUTH_COOKIE_SECURE) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'AUTH_COOKIE_SECURE must be true when AUTH_COOKIE_SAME_SITE is none',
-        path: ['AUTH_COOKIE_SECURE'],
-      })
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'AUTH_COOKIE_SECURE must be true when AUTH_COOKIE_SAME_SITE is none', path: ['AUTH_COOKIE_SECURE'] })
     }
   })
 
 const parsed = envSchema.safeParse(process.env)
-
 if (!parsed.success) {
-  const message = parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ')
-  throw new Error(`Invalid environment: ${message}`)
+  const message = parsed.error.issues.map((issue) => issue.path.join('.') + ': ' + issue.message).join('; ')
+  throw new Error('Invalid environment: ' + message)
 }
 
 function splitOrigins(value: string | undefined) {
-  return (value ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean)
+  return (value ?? '').split(',').map((origin) => origin.trim()).filter(Boolean)
 }
 
 export const env = {
   adminCursorSecret: parsed.data.ADMIN_CURSOR_SECRET ?? parsed.data.IP_HASH_SECRET ?? 'development-only-admin-cursor-secret',
+  adminExportEnabled: parsed.data.ADMIN_EXPORT_ENABLED,
   authCookieDomain: parsed.data.AUTH_COOKIE_DOMAIN ?? null,
   authCookieSameSite: parsed.data.AUTH_COOKIE_SAME_SITE,
   authCookieSecure: parsed.data.AUTH_COOKIE_SECURE,
@@ -182,6 +128,9 @@ export const env = {
   dbIdleTimeoutMs: parsed.data.DB_IDLE_TIMEOUT_MS,
   dbPoolMax: parsed.data.DB_POOL_MAX,
   dbSsl: parsed.data.DB_SSL,
+  exportWorkerLockMs: parsed.data.EXPORT_WORKER_LOCK_MS,
+  exportWorkerLoopIntervalMs: parsed.data.EXPORT_WORKER_LOOP_INTERVAL_MS,
+  exportWorkerMaxAttempts: parsed.data.EXPORT_WORKER_MAX_ATTEMPTS,
   host: parsed.data.HOST,
   ipHashSecret: parsed.data.IP_HASH_SECRET ?? 'development-only-ip-hash-secret',
   logLevel: parsed.data.LOG_LEVEL,

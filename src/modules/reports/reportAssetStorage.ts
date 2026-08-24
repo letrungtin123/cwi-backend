@@ -123,6 +123,13 @@ export class ReportAssetStorage {
     })
   }
 
+  async removeFile(objectPath: string) {
+    assertObjectPath(objectPath)
+    await this.request(`object/${encodeURIComponent(this.config.bucket)}/${encodeObjectPath(objectPath)}`, {
+      method: 'DELETE',
+    })
+  }
+
   async download(objectPath: string): Promise<ReportAssetDownload> {
     assertObjectPath(objectPath)
     const response = await this.request(`object/authenticated/${encodeURIComponent(this.config.bucket)}/${encodeObjectPath(objectPath)}`, {
@@ -187,3 +194,4 @@ export class ReportAssetStorage {
     }
   }
 }
+

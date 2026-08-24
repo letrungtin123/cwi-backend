@@ -4,6 +4,7 @@ import { createDbPool } from './db/pool.js'
 import { createLogger } from './logger.js'
 import { createApp } from './app.js'
 import { PgAdminRepository } from './modules/admin/adminRepository.js'
+import { PgExportRepository } from './modules/exports/exportRepository.js'
 import { PgAuthRepository } from './modules/auth/authRepository.js'
 import { AuthService } from './modules/auth/authService.js'
 import { ReportAssetStorage } from './modules/reports/reportAssetStorage.js'
@@ -24,6 +25,7 @@ const pool = createDbPool({
 
 const config: RuntimeConfig = {
   adminCursorSecret: env.adminCursorSecret,
+  adminExportEnabled: env.adminExportEnabled,
   auth: {
     cookieDomain: env.authCookieDomain,
     cookieSameSite: env.authCookieSameSite,
@@ -48,6 +50,7 @@ const config: RuntimeConfig = {
 const surveyRepository = new PgSurveyRepository(pool)
 const roundtableRepository = new PgRoundtableRepository(pool)
 const adminRepository = new PgAdminRepository(pool, config.adminCursorSecret)
+const exportRepository = new PgExportRepository(pool)
 const reportRepository = new PgReportRepository(pool)
 const authRepository = new PgAuthRepository(pool)
 const authService = new AuthService(authRepository, config.auth)
@@ -58,25 +61,21 @@ const reportAssetStorage = new ReportAssetStorage({
   timeoutMs: env.reportStorageUploadTimeoutMs,
 })
 
-// Temporarily disabled: do not enqueue or call the cwi-ai report service.
 const surveyService = new SurveyService(surveyRepository)
 const roundtableService = new RoundtableService(roundtableRepository)
-const app = createApp({ adminRepository, authService, config, logger, pool, reportAssetStorage, reportRepository, roundtableService, surveyService })
+const app = createApp({ adminRepository, authService, config, exportRepository, logger, pool, reportAssetStorage, reportRepository, roundtableService, surveyService })
 
 const server = app.listen(env.port, env.host, () => {
   logger.info({ host: env.host, port: env.port }, 'CWI backend listening')
-  // cwi-ai report worker is intentionally disabled.
 })
 
 async function shutdown(signal: string) {
   logger.info({ signal }, 'Shutting down CWI backend')
-  // cwi-ai report worker is intentionally disabled.
   server.close(async (error) => {
     if (error) {
       logger.error({ error }, 'HTTP server shutdown failed')
       process.exitCode = 1
     }
-
     await pool.end()
     process.exit()
   })
@@ -85,7 +84,6 @@ async function shutdown(signal: string) {
 process.on('SIGINT', () => {
   void shutdown('SIGINT')
 })
-
 process.on('SIGTERM', () => {
   void shutdown('SIGTERM')
 })

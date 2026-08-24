@@ -198,8 +198,10 @@ public_pid=""
 
 rollout_started=1
 pm2 stop cwi-backend >/dev/null 2>&1 || true
+pm2 stop cwi-export-worker >/dev/null 2>&1 || true
 pm2 stop cwi-public >/dev/null 2>&1 || true
 pm2 delete cwi-backend >/dev/null 2>&1 || true
+pm2 delete cwi-export-worker >/dev/null 2>&1 || true
 pm2 delete cwi-public >/dev/null 2>&1 || true
 start_release "${release_dir}"
 pm2 save
@@ -212,3 +214,5 @@ fi
 ln -sfn "${release_dir}" "${current_link}"
 rollout_succeeded=1
 echo "Production update completed from Git origin/main at ${release_dir}"
+
+

@@ -6,6 +6,8 @@ import { decodeCursor } from '../../http/cursor.js'
 import { requireAdminSession } from '../../http/adminSession.js'
 import { HttpError } from '../../http/errors.js'
 import type { AuthService } from '../auth/authService.js'
+import { createExportRouter } from '../exports/exportRoutes.js'
+import type { PgExportRepository } from '../exports/exportRepository.js'
 import { ReportAssetStorageError, type ReportAssetStorage } from '../reports/reportAssetStorage.js'
 import type { PgReportRepository } from '../reports/reportRepository.js'
 import type { PgAdminRepository } from './adminRepository.js'
@@ -16,83 +18,57 @@ const validRoundtableLinkStatuses = new Set(['linked', 'standalone'])
 
 function parseLimit(value: unknown) {
   if (value === undefined) return 10
-  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
-    throw new HttpError(400, 'invalid_limit', 'limit must be a positive integer.')
-  }
-
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) throw new HttpError(400, 'invalid_limit', 'limit must be a positive integer.')
   const parsed = Number(value)
-  if (!Number.isSafeInteger(parsed) || parsed > 100) {
-    throw new HttpError(400, 'invalid_limit', 'limit must be between 1 and 100.')
-  }
-
+  if (!Number.isSafeInteger(parsed) || parsed > 100) throw new HttpError(400, 'invalid_limit', 'limit must be between 1 and 100.')
   return parsed
 }
 
 export function parseFullSubmissionLimit(value: unknown) {
   const parsed = parseLimit(value)
-  if (parsed > 10) {
-    throw new HttpError(400, 'invalid_limit', 'limit must be between 1 and 10 for the full submissions endpoint.')
-  }
-
+  if (parsed > 10) throw new HttpError(400, 'invalid_limit', 'limit must be between 1 and 10 for the full submissions endpoint.')
   return parsed
 }
 
 function parsePage(value: unknown) {
   if (value === undefined) return 1
-  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
-    throw new HttpError(400, 'invalid_page', 'page must be a positive integer.')
-  }
-
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) throw new HttpError(400, 'invalid_page', 'page must be a positive integer.')
   const parsed = Number(value)
-  if (!Number.isSafeInteger(parsed) || parsed > 10_000) {
-    throw new HttpError(400, 'invalid_page', 'page must be between 1 and 10000.')
-  }
-
+  if (!Number.isSafeInteger(parsed) || parsed > 10_000) throw new HttpError(400, 'invalid_page', 'page must be between 1 and 10000.')
   return parsed
 }
 
 function parseBefore(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
   const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) {
-    throw new HttpError(400, 'invalid_before_cursor', 'before must be an ISO timestamp.')
-  }
+  if (Number.isNaN(parsed.getTime())) throw new HttpError(400, 'invalid_before_cursor', 'before must be an ISO timestamp.')
   return parsed
 }
 
 function parseBeforeId(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
-  if (!uuidPattern.test(value)) {
-    throw new HttpError(400, 'invalid_before_cursor_id', 'beforeId must be a valid UUID.')
-  }
+  if (!uuidPattern.test(value)) throw new HttpError(400, 'invalid_before_cursor_id', 'beforeId must be a valid UUID.')
   return value
 }
 
 function parseBeforeCursor(beforeValue: unknown, beforeIdValue: unknown) {
   const before = parseBefore(beforeValue)
   const beforeId = parseBeforeId(beforeIdValue)
-  if (beforeId && !before) {
-    throw new HttpError(400, 'invalid_before_cursor', 'beforeId requires before.')
-  }
+  if (beforeId && !before) throw new HttpError(400, 'invalid_before_cursor', 'beforeId requires before.')
   return { before, beforeId }
 }
 
 function parsePaginationCursor(cursorValue: unknown, beforeValue: unknown, beforeIdValue: unknown, secret: string) {
   if (cursorValue !== undefined) {
-    if (beforeValue !== undefined || beforeIdValue !== undefined) {
-      throw new HttpError(400, 'ambiguous_cursor', 'Use cursor or before/beforeId, not both.')
-    }
+    if (beforeValue !== undefined || beforeIdValue !== undefined) throw new HttpError(400, 'ambiguous_cursor', 'Use cursor or before/beforeId, not both.')
     return decodeCursor(secret, cursorValue)
   }
-
   return parseBeforeCursor(beforeValue, beforeIdValue)
 }
 
 function parseStatus(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
-  if (!validStatuses.has(value)) {
-    throw new HttpError(400, 'invalid_submission_status', 'submission_status filter is invalid.')
-  }
+  if (!validStatuses.has(value)) throw new HttpError(400, 'invalid_submission_status', 'submission_status filter is invalid.')
   return value
 }
 
@@ -116,21 +92,13 @@ function parseRoundtableLinkStatus(value: unknown) {
 }
 
 function assertUuid(id: string | undefined, code: string, message: string) {
-  if (!id || !uuidPattern.test(id)) {
-    throw new HttpError(400, code, message)
-  }
+  if (!id || !uuidPattern.test(id)) throw new HttpError(400, code, message)
   return id
 }
 
 function reportStorageErrorToHttp(error: ReportAssetStorageError): HttpError {
-  if (error.status === 404) {
-    return new HttpError(404, 'report_pdf_missing', 'Report PDF file is missing from storage.')
-  }
-
-  if (error.retryable) {
-    return new HttpError(503, 'report_storage_unavailable', 'Report storage is temporarily unavailable.')
-  }
-
+  if (error.status === 404) return new HttpError(404, 'report_pdf_missing', 'Report PDF file is missing from storage.')
+  if (error.retryable) return new HttpError(503, 'report_storage_unavailable', 'Report storage is temporarily unavailable.')
   return new HttpError(500, 'report_storage_error', 'Report storage request failed.')
 }
 
@@ -143,12 +111,14 @@ export function createAdminRouter(
   repository: PgAdminRepository,
   reportRepository: PgReportRepository,
   reportAssetStorage: ReportAssetStorage,
+  exportRepository: PgExportRepository,
   authService: AuthService,
   config: RuntimeConfig,
 ) {
   const router = Router()
 
   router.use(requireAdminSession(authService, config))
+  router.use('/exports', createExportRouter(exportRepository, reportAssetStorage, config))
 
   router.get('/roundtable-registrations/stats', async (_req, res, next) => {
     try {
@@ -211,24 +181,19 @@ export function createAdminRouter(
     try {
       const id = assertUuid(req.params.id, 'invalid_report_job_id', 'Report job id must be a UUID.')
       const reportJob = await reportRepository.getReportJobDownload(id)
-      if (!reportJob) {
-        throw new HttpError(404, 'report_pdf_not_found', 'Report PDF is not available.')
-      }
-
+      if (!reportJob) throw new HttpError(404, 'report_pdf_not_found', 'Report PDF is not available.')
       const asset = await reportAssetStorage.download(reportJob.pdfStoragePath)
       res.setHeader('Cache-Control', 'private, no-store')
       res.setHeader('Content-Disposition', contentDisposition(req.query.download))
       res.setHeader('Content-Type', asset.contentType || 'application/pdf')
       res.setHeader('X-Content-Type-Options', 'nosniff')
       if (asset.contentLength) res.setHeader('Content-Length', asset.contentLength)
-
       await pipeline(Readable.fromWeb(asset.body), res)
     } catch (error) {
       if (error instanceof ReportAssetStorageError) {
         next(reportStorageErrorToHttp(error))
         return
       }
-
       next(error)
     }
   })
@@ -276,7 +241,6 @@ export function createAdminRouter(
         status: parseStatus(req.query.status),
       })
       const totalPages = result.totalItems === 0 ? 0 : Math.ceil(result.totalItems / limit)
-
       res.setHeader('X-API-Deprecated', 'Use /survey-submissions/page and /survey-submissions/:id instead.')
       res.json({
         data: {

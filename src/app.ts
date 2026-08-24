@@ -12,6 +12,7 @@ import type { RuntimeConfig } from './config/runtime.js'
 import { HttpError, isHttpError } from './http/errors.js'
 import { createAdminRouter } from './modules/admin/adminRoutes.js'
 import type { PgAdminRepository } from './modules/admin/adminRepository.js'
+import type { PgExportRepository } from './modules/exports/exportRepository.js'
 import { createAuthRouter } from './modules/auth/authRoutes.js'
 import type { AuthService } from './modules/auth/authService.js'
 import type { ReportAssetStorage } from './modules/reports/reportAssetStorage.js'
@@ -25,6 +26,7 @@ export type AppDependencies = {
   adminRepository: PgAdminRepository
   authService: AuthService
   config: RuntimeConfig
+  exportRepository: PgExportRepository
   logger: Logger
   pool: pg.Pool
   reportAssetStorage: ReportAssetStorage
@@ -39,7 +41,6 @@ function isAllowedDevOrigin(origin: string) {
 
 function createCorsOptions(config: RuntimeConfig): cors.CorsOptions {
   const allowedOrigins = new Set(config.corsAllowedOrigins)
-
   return {
     credentials: true,
     origin(origin, callback) {
@@ -47,12 +48,10 @@ function createCorsOptions(config: RuntimeConfig): cors.CorsOptions {
         callback(null, true)
         return
       }
-
       if (allowedOrigins.has(origin) || (config.nodeEnv !== 'production' && isAllowedDevOrigin(origin))) {
         callback(null, true)
         return
       }
-
       callback(new HttpError(403, 'cors_origin_denied', 'CORS origin is not allowed.'))
     },
   }
@@ -68,42 +67,27 @@ function requestBodyError(error: unknown) {
       issues: error.issues.map((issue) => ({ code: issue.code, message: issue.message, path: issue.path })),
     })
   }
-
   if (error instanceof SyntaxError && (error as SyntaxError & { type?: string }).type === 'entity.parse.failed') {
     return new HttpError(400, 'invalid_json', 'Request body contains invalid JSON.')
   }
-
   if (typeof error === 'object' && error !== null && 'type' in error && error.type === 'entity.too.large') {
     return new HttpError(413, 'request_too_large', 'Request body is too large.')
   }
-
   return null
 }
 
 function handleError(logger: Logger) {
   return (error: unknown, req: Request, res: Response, _next: NextFunction) => {
-    const normalizedError = requestBodyError(error)
-    const safeError = normalizedError ?? error
-
+    const safeError = requestBodyError(error) ?? error
     if (isHttpError(safeError)) {
       res.status(safeError.statusCode).json({
-        error: {
-          code: safeError.code,
-          details: safeError.details,
-          message: safeError.message,
-          requestId: req.id,
-        },
+        error: { code: safeError.code, details: safeError.details, message: safeError.message, requestId: req.id },
       })
       return
     }
-
     logger.error({ error, requestId: req.id }, 'Unhandled request error')
     res.status(500).json({
-      error: {
-        code: 'internal_server_error',
-        message: 'Internal server error.',
-        requestId: req.id,
-      },
+      error: { code: 'internal_server_error', message: 'Internal server error.', requestId: req.id },
     })
   }
 }
@@ -113,54 +97,29 @@ function noStore(res: Response) {
 }
 
 export function createApp(dependencies: AppDependencies) {
-  const { adminRepository, authService, config, logger, pool, reportAssetStorage, reportRepository, roundtableService, surveyService } = dependencies
+  const { adminRepository, authService, config, exportRepository, logger, pool, reportAssetStorage, reportRepository, roundtableService, surveyService } = dependencies
   const app = express()
-
   app.disable('x-powered-by')
   app.set('trust proxy', config.trustProxy)
-
   const pinoHttp = pinoHttpImport.default ?? pinoHttpImport
-  app.use(
-    pinoHttp({
-      genReqId: (req: Request) => req.get('x-request-id') || randomUUID(),
-      logger,
-    }),
-  )
+  app.use(pinoHttp({ genReqId: (req: Request) => req.get('x-request-id') || randomUUID(), logger }))
   app.use(helmet())
   app.use(compression())
   app.use(cors(createCorsOptions(config)))
-  app.use(
-    rateLimit({
-      legacyHeaders: false,
-      limit: config.rateLimitMax,
-      standardHeaders: 'draft-7',
-      windowMs: config.rateLimitWindowMs,
-    }),
-  )
+  app.use(rateLimit({ legacyHeaders: false, limit: config.rateLimitMax, standardHeaders: 'draft-7', windowMs: config.rateLimitWindowMs }))
   app.use(express.json({ limit: config.requestBodyLimit }))
 
   const liveness = (_req: Request, res: Response) => {
     noStore(res)
-    res.json({
-      data: {
-        service: 'cwi-backend',
-        status: 'ok',
-      },
-    })
+    res.json({ data: { service: 'cwi-backend', status: 'ok' } })
   }
-
   app.get('/health', liveness)
   app.get('/healthz', liveness)
   app.get('/readyz', async (_req, res, next) => {
     try {
       await pool.query('SELECT 1')
       noStore(res)
-      res.json({
-        data: {
-          service: 'cwi-backend',
-          status: 'ready',
-        },
-      })
+      res.json({ data: { service: 'cwi-backend', status: 'ready' } })
     } catch {
       next(new HttpError(503, 'not_ready', 'Service dependencies are not ready.'))
     }
@@ -169,10 +128,8 @@ export function createApp(dependencies: AppDependencies) {
   app.use('/api/v1/auth', createAuthRouter(authService, config))
   app.use('/api/v1/roundtable-registrations', createRoundtableRouter(roundtableService, config))
   app.use('/api/v1/survey-submissions', createSurveyRouter(surveyService, config))
-  app.use('/api/v1/admin', createAdminRouter(adminRepository, reportRepository, reportAssetStorage, authService, config))
-
+  app.use('/api/v1/admin', createAdminRouter(adminRepository, reportRepository, reportAssetStorage, exportRepository, authService, config))
   app.use(handleNotFound)
   app.use(handleError(logger))
-
   return app
 }
