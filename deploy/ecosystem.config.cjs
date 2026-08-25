@@ -39,6 +39,18 @@ module.exports = {
       max_restarts: 10,
     },
     {
+      name: 'cwi-report-delivery-worker',
+      cwd: backendRoot,
+      script: 'deploy/start-report-delivery-worker.mjs',
+      interpreter: nodePath,
+      env: { NODE_ENV: nodeEnv },
+      env_production: { NODE_ENV: 'production', ...productionBackendEnv },
+      autorestart: true,
+      max_memory_restart: '512M',
+      exp_backoff_restart_delay: 100,
+      max_restarts: 10,
+    },
+    {
       name: 'cwi-public',
       cwd: platformRoot,
       script: publicRouter,

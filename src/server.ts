@@ -13,6 +13,8 @@ import { PgRoundtableRepository } from './modules/roundtable/roundtableRepositor
 import { RoundtableService } from './modules/roundtable/roundtableService.js'
 import { PgSurveyRepository } from './modules/survey/surveyRepository.js'
 import { SurveyService } from './modules/survey/surveyService.js'
+import { PgReportDeliveryRepository } from './modules/reportDelivery/reportDeliveryRepository.js'
+import { SmtpReportMailer } from './modules/reportDelivery/smtpMailer.js'
 
 const logger = createLogger(env.logLevel)
 const pool = createDbPool({
@@ -26,6 +28,9 @@ const pool = createDbPool({
 const config: RuntimeConfig = {
   adminCursorSecret: env.adminCursorSecret,
   adminExportEnabled: env.adminExportEnabled,
+  reportDeliveryEnabled: env.reportDeliveryEnabled,
+  reportDeliveryBucket: env.reportDeliveryBucket,
+  reportUploadMaxBytes: env.reportUploadMaxBytes,
   auth: {
     cookieDomain: env.authCookieDomain,
     cookieSameSite: env.authCookieSameSite,
@@ -60,10 +65,34 @@ const reportAssetStorage = new ReportAssetStorage({
   storageUrl: env.supabaseStorageUrl,
   timeoutMs: env.reportStorageUploadTimeoutMs,
 })
+const submissionReportStorage = new ReportAssetStorage({
+  bucket: env.reportDeliveryBucket,
+  serviceRoleKey: env.supabaseServiceRoleKey,
+  storageUrl: env.supabaseStorageUrl,
+  timeoutMs: env.reportStorageUploadTimeoutMs,
+})
+const reportDeliveryRepository = new PgReportDeliveryRepository(pool)
+const reportMailer = new SmtpReportMailer({
+  authMode: env.mailAuthMode,
+  fromAddress: env.mailFromAddress,
+  fromName: env.mailFromName,
+  host: env.mailSmtpHost,
+  m365ClientId: env.mailM365ClientId,
+  m365ClientSecret: env.mailM365ClientSecret,
+  m365Scope: env.mailM365Scope,
+  m365TenantId: env.mailM365TenantId,
+  password: env.mailSmtpPassword,
+  port: env.mailSmtpPort,
+  replyTo: env.mailReplyTo,
+  requireTls: env.mailSmtpRequireTls,
+  secure: env.mailSmtpSecure,
+  tokenTimeoutMs: env.mailM365TokenTimeoutMs,
+  user: env.mailSmtpUser,
+})
 
 const surveyService = new SurveyService(surveyRepository)
 const roundtableService = new RoundtableService(roundtableRepository)
-const app = createApp({ adminRepository, authService, config, exportRepository, logger, pool, reportAssetStorage, reportRepository, roundtableService, surveyService })
+const app = createApp({ adminRepository, authService, config, exportRepository, logger, pool, reportAssetStorage, submissionReportStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, surveyService })
 
 const server = app.listen(env.port, env.host, () => {
   logger.info({ host: env.host, port: env.port }, 'CWI backend listening')

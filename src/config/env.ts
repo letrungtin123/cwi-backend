@@ -22,6 +22,7 @@ const envSchema = z
   .object({
     ADMIN_CURSOR_SECRET: z.string().optional(),
     ADMIN_EXPORT_ENABLED: booleanSchema.default(false),
+    RABBITMQ_URL: z.string().url().optional(),
     AUTH_COOKIE_DOMAIN: z.string().optional(),
     AUTH_COOKIE_SAME_SITE: z.enum(['lax', 'none', 'strict']).default('lax'),
     AUTH_COOKIE_SECURE: booleanSchema.default(false),
@@ -54,6 +55,30 @@ const envSchema = z
     REPORT_STORAGE_UPLOAD_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300000).default(60000),
     REPORT_SERVICE_ENABLED: booleanSchema.default(false),
     REPORT_SERVICE_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300000).default(10000),
+    REPORT_DELIVERY_ENABLED: booleanSchema.default(false),
+    REPORT_DELIVERY_BUCKET: bucketNameSchema.default('cwi-submission-report-pdfs'),
+    REPORT_DELIVERY_BATCH_SIZE: z.coerce.number().int().min(10).max(5000).default(500),
+    REPORT_DELIVERY_LOCK_MS: z.coerce.number().int().min(30000).max(1800000).default(300000),
+    REPORT_DELIVERY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+    REPORT_DELIVERY_PREFETCH: z.coerce.number().int().min(1).max(50).default(2),
+    REPORT_DELIVERY_CONCURRENCY: z.coerce.number().int().min(1).max(10).default(1),
+    REPORT_UPLOAD_MAX_BYTES: z.coerce.number().int().min(1048576).max(52428800).default(52428800),
+    MAIL_AUTH_MODE: z.enum(['basic', 'microsoft365-oauth2']).default('basic'),
+    MAIL_M365_CLIENT_ID: z.string().trim().optional(),
+    MAIL_M365_CLIENT_SECRET: z.string().optional(),
+    MAIL_M365_SCOPE: z.string().url().default('https://outlook.office365.com/.default'),
+    MAIL_M365_TENANT_ID: z.string().trim().optional(),
+    MAIL_M365_TOKEN_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(10000),
+    MAIL_SMTP_HOST: z.string().trim().optional(),
+    MAIL_SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+    MAIL_SMTP_REQUIRE_TLS: booleanSchema.default(true),
+    MAIL_SMTP_SECURE: booleanSchema.default(false),
+    MAIL_SMTP_USER: z.string().trim().optional(),
+    MAIL_SMTP_PASSWORD: z.string().optional(),
+    MAIL_FROM_NAME: z.string().trim().min(1).max(160).default('CEO Workforce Index'),
+    MAIL_FROM_ADDRESS: z.string().trim().email().optional(),
+    MAIL_REPLY_TO: z.string().trim().email().optional(),
+    MAIL_SEND_RATE_PER_SECOND: z.coerce.number().int().min(1).max(100).default(2),
     REPORT_STORAGE_DIR: z.string().trim().min(1).default('./storage/reports'),
     REPORT_WORKER_INITIAL_POLL_DELAY_MS: z.coerce.number().int().min(1000).max(600000).default(10000),
     REPORT_WORKER_LOCK_MS: z.coerce.number().int().min(30000).max(1800000).default(300000),
@@ -88,6 +113,21 @@ const envSchema = z
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'AUTH_COOKIE_SECURE must be true in production', path: ['AUTH_COOKIE_SECURE'] })
       }
     }
+    if (value.REPORT_DELIVERY_ENABLED) {
+      if (!value.RABBITMQ_URL) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'RABBITMQ_URL is required when report delivery is enabled', path: ['RABBITMQ_URL'] })
+      if (!value.MAIL_SMTP_HOST || !value.MAIL_SMTP_USER || !value.MAIL_FROM_ADDRESS) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SMTP host, mailbox and from address are required when report delivery is enabled', path: ['MAIL_SMTP_HOST'] })
+      }
+      if (value.MAIL_AUTH_MODE === 'basic' && !value.MAIL_SMTP_PASSWORD) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'MAIL_SMTP_PASSWORD is required when MAIL_AUTH_MODE is basic', path: ['MAIL_SMTP_PASSWORD'] })
+      }
+      if (value.MAIL_AUTH_MODE === 'microsoft365-oauth2' && (!value.MAIL_M365_TENANT_ID || !value.MAIL_M365_CLIENT_ID || !value.MAIL_M365_CLIENT_SECRET)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Microsoft 365 OAuth credentials are required when MAIL_AUTH_MODE is microsoft365-oauth2', path: ['MAIL_M365_TENANT_ID'] })
+      }
+      if (value.NODE_ENV === 'production' && value.MAIL_AUTH_MODE === 'basic' && !value.MAIL_SMTP_REQUIRE_TLS) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Production SMTP basic authentication requires STARTTLS', path: ['MAIL_SMTP_REQUIRE_TLS'] })
+      }
+    }
     if (value.REPORT_SERVICE_ENABLED) {
       if (!value.SUPABASE_SERVICE_ROLE_KEY || value.SUPABASE_SERVICE_ROLE_KEY.length < 32) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SUPABASE_SERVICE_ROLE_KEY is required when REPORT_SERVICE_ENABLED is true', path: ['SUPABASE_SERVICE_ROLE_KEY'] })
@@ -114,6 +154,7 @@ function splitOrigins(value: string | undefined) {
 export const env = {
   adminCursorSecret: parsed.data.ADMIN_CURSOR_SECRET ?? parsed.data.IP_HASH_SECRET ?? 'development-only-admin-cursor-secret',
   adminExportEnabled: parsed.data.ADMIN_EXPORT_ENABLED,
+  rabbitmqUrl: parsed.data.RABBITMQ_URL ?? '',
   authCookieDomain: parsed.data.AUTH_COOKIE_DOMAIN ?? null,
   authCookieSameSite: parsed.data.AUTH_COOKIE_SAME_SITE,
   authCookieSecure: parsed.data.AUTH_COOKIE_SECURE,
@@ -144,6 +185,30 @@ export const env = {
   reportServiceBaseUrl: parsed.data.REPORT_SERVICE_BASE_URL,
   reportServiceEnabled: parsed.data.REPORT_SERVICE_ENABLED,
   reportServiceTimeoutMs: parsed.data.REPORT_SERVICE_TIMEOUT_MS,
+  reportDeliveryEnabled: parsed.data.REPORT_DELIVERY_ENABLED,
+  reportDeliveryBucket: parsed.data.REPORT_DELIVERY_BUCKET,
+  reportDeliveryBatchSize: parsed.data.REPORT_DELIVERY_BATCH_SIZE,
+  reportDeliveryLockMs: parsed.data.REPORT_DELIVERY_LOCK_MS,
+  reportDeliveryMaxAttempts: parsed.data.REPORT_DELIVERY_MAX_ATTEMPTS,
+  reportDeliveryPrefetch: parsed.data.REPORT_DELIVERY_PREFETCH,
+  reportDeliveryConcurrency: parsed.data.REPORT_DELIVERY_CONCURRENCY,
+  reportUploadMaxBytes: parsed.data.REPORT_UPLOAD_MAX_BYTES,
+  mailAuthMode: parsed.data.MAIL_AUTH_MODE,
+  mailM365ClientId: parsed.data.MAIL_M365_CLIENT_ID ?? '',
+  mailM365ClientSecret: parsed.data.MAIL_M365_CLIENT_SECRET ?? '',
+  mailM365Scope: parsed.data.MAIL_M365_SCOPE,
+  mailM365TenantId: parsed.data.MAIL_M365_TENANT_ID ?? '',
+  mailM365TokenTimeoutMs: parsed.data.MAIL_M365_TOKEN_TIMEOUT_MS,
+  mailSmtpHost: parsed.data.MAIL_SMTP_HOST ?? '',
+  mailSmtpPort: parsed.data.MAIL_SMTP_PORT,
+  mailSmtpRequireTls: parsed.data.MAIL_SMTP_REQUIRE_TLS,
+  mailSmtpSecure: parsed.data.MAIL_SMTP_SECURE,
+  mailSmtpUser: parsed.data.MAIL_SMTP_USER ?? '',
+  mailSmtpPassword: parsed.data.MAIL_SMTP_PASSWORD ?? '',
+  mailFromName: parsed.data.MAIL_FROM_NAME,
+  mailFromAddress: parsed.data.MAIL_FROM_ADDRESS ?? '',
+  mailReplyTo: parsed.data.MAIL_REPLY_TO ?? '',
+  mailSendRatePerSecond: parsed.data.MAIL_SEND_RATE_PER_SECOND,
   reportStorageBucket: parsed.data.REPORT_STORAGE_BUCKET,
   reportStorageDir: parsed.data.REPORT_STORAGE_DIR,
   reportStorageUploadTimeoutMs: parsed.data.REPORT_STORAGE_UPLOAD_TIMEOUT_MS,

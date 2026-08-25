@@ -16,6 +16,9 @@ import type { PgExportRepository } from './modules/exports/exportRepository.js'
 import { createAuthRouter } from './modules/auth/authRoutes.js'
 import type { AuthService } from './modules/auth/authService.js'
 import type { ReportAssetStorage } from './modules/reports/reportAssetStorage.js'
+import { createReportDeliveryRouter } from './modules/reportDelivery/reportDeliveryRoutes.js'
+import type { PgReportDeliveryRepository } from './modules/reportDelivery/reportDeliveryRepository.js'
+import type { SmtpReportMailer } from './modules/reportDelivery/smtpMailer.js'
 import type { PgReportRepository } from './modules/reports/reportRepository.js'
 import { createRoundtableRouter } from './modules/roundtable/roundtableRoutes.js'
 import type { RoundtableService } from './modules/roundtable/roundtableService.js'
@@ -30,6 +33,9 @@ export type AppDependencies = {
   logger: Logger
   pool: pg.Pool
   reportAssetStorage: ReportAssetStorage
+  submissionReportStorage: ReportAssetStorage
+  reportDeliveryRepository: PgReportDeliveryRepository
+  reportMailer: SmtpReportMailer
   reportRepository: PgReportRepository
   roundtableService: RoundtableService
   surveyService: SurveyService
@@ -97,7 +103,7 @@ function noStore(res: Response) {
 }
 
 export function createApp(dependencies: AppDependencies) {
-  const { adminRepository, authService, config, exportRepository, logger, pool, reportAssetStorage, reportRepository, roundtableService, surveyService } = dependencies
+  const { adminRepository, authService, config, exportRepository, logger, pool, reportAssetStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, submissionReportStorage, surveyService } = dependencies
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', config.trustProxy)
@@ -129,6 +135,7 @@ export function createApp(dependencies: AppDependencies) {
   app.use('/api/v1/roundtable-registrations', createRoundtableRouter(roundtableService, config))
   app.use('/api/v1/survey-submissions', createSurveyRouter(surveyService, config))
   app.use('/api/v1/admin', createAdminRouter(adminRepository, reportRepository, reportAssetStorage, exportRepository, authService, config))
+  app.use('/api/v1/admin/report-delivery', createReportDeliveryRouter(reportDeliveryRepository, submissionReportStorage, reportMailer, authService, config))
   app.use(handleNotFound)
   app.use(handleError(logger))
   return app
