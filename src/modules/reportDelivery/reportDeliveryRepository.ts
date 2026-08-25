@@ -357,7 +357,7 @@ export class PgReportDeliveryRepository {
     const leaseToken = randomUUID()
     const result = await this.pool.query<{ id: string; campaign_id: string; submission_id: string; recipient_email: string; recipient_name: string; storage_bucket: string; storage_path: string; file_sha256: string; attempt_count: number; original_file_name: string | null }>(
       [
-        `WITH candidate AS (SELECT j.id FROM public.cwi_report_email_jobs j JOIN public.cwi_submission_report_files f ON f.submission_id = j.submission_id AND f.storage_path = j.storage_path WHERE j.id = $1 AND j.status = 'queued' AND j.next_attempt_at <= now() FOR UPDATE OF j SKIP LOCKED),`,
+        `WITH candidate AS (SELECT j.id FROM public.cwi_report_email_jobs j JOIN public.cwi_submission_report_files f ON f.submission_id = j.submission_id AND f.storage_path = j.storage_path WHERE j.id = $1 AND j.status = 'queued' AND j.next_attempt_at <= now() FOR UPDATE OF j),`,
         `updated AS (`,
         `  UPDATE public.cwi_report_email_jobs j SET status = 'sending', attempt_count = j.attempt_count + 1, locked_at = now(), locked_by = $2, lease_token = $4, lease_expires_at = now() + ($3::bigint * interval '1 millisecond'), attempt_started_at = now(), delivery_unknown_at = NULL, last_error_code = NULL, last_error_message = NULL FROM candidate WHERE j.id = candidate.id`,
         `  RETURNING j.id, j.campaign_id, j.submission_id, j.recipient_email, j.recipient_name, j.storage_bucket, j.storage_path, j.file_sha256, j.attempt_count`,

@@ -52,6 +52,7 @@ describe("PgReportDeliveryRepository", () => {
     })
     expect(String(query.mock.calls[0]?.[0])).toContain("original_file_name")
     expect(String(query.mock.calls[0]?.[0])).not.toContain("published_at IS NOT NULL")
+    expect(String(query.mock.calls[0]?.[0])).not.toContain("FOR UPDATE OF j SKIP LOCKED")
   })
 })
 

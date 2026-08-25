@@ -89,7 +89,10 @@ async function consumeSend(repository: PgReportDeliveryRepository, storage: Repo
   const { jobId } = messageJson(message)
   if (!jobId) return
   const job = await repository.claimJob(jobId, workerId, env.reportDeliveryLockMs)
-  if (!job) return
+  if (!job) {
+    logger.warn({ jobId }, 'Send message skipped because the email job is no longer claimable')
+    return
+  }
   const directory = await mkdtemp(join(tmpdir(), 'cwi-report-delivery-'))
   const pdfPath = join(directory, 'report.pdf')
   let smtpAccepted = false

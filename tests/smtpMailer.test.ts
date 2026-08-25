@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { buildReportEmail, reportEmailLogoPath } from '../src/modules/reportDelivery/emailTemplate.js'
+import { buildReportEmail } from '../src/modules/reportDelivery/emailTemplate.js'
 import { buildReportPdfAttachment, Microsoft365OAuthTokenProvider } from '../src/modules/reportDelivery/smtpMailer.js'
 
 describe('Microsoft365OAuthTokenProvider', () => {
@@ -79,8 +79,9 @@ describe('report email template', () => {
     expect(text).toContain('- Đối chuẩn với thị trường để biết doanh nghiệp đang ở đâu.\n- Nhận diện những khoảng trống và rủi ro cần lưu ý.\n- Tham khảo và lựa chọn khuyến nghị hành động phù hợp cho việc tăng trưởng kinh doanh')
     expect(text).toContain('Phạm Thị Mỹ Lệ\nT/M Ban tổ chức\nCEO WORKFORCE INDEX\nBetter workforce. Better business.')
     expect(text).toContain('Facebook: https://www.facebook.com/profile.php?id=61593195651105')
-    expect(html).toContain('data:image/svg+xml;base64,')
+    expect(html).toContain('CEO Workforce Index')
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('data:image/')
     expect(html).not.toContain('cid:')
-    expect(reportEmailLogoPath).toMatch(/assets[\\/]cwi-logo\.svg$/)
   })
 })

@@ -1,9 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-
-export const reportEmailLogoPath = fileURLToPath(new URL('./assets/cwi-logo.svg', import.meta.url))
-const reportEmailLogoDataUri = 'data:image/svg+xml;base64,' + readFileSync(reportEmailLogoPath).toString('base64')
-
 export function buildReportEmail() {
   const html = `<!doctype html>
 <html lang="vi">
@@ -16,7 +10,6 @@ export function buildReportEmail() {
       .email-shell { width: 100% !important; }
       .email-content { padding: 28px 20px !important; }
       .email-header { padding: 22px 20px !important; }
-      .email-logo { width: 148px !important; }
       .email-footer { padding: 20px !important; }
     }
   </style>
@@ -29,7 +22,7 @@ export function buildReportEmail() {
         <table role="presentation" class="email-shell" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:680px;background:#ffffff;border:1px solid #dce5f0;border-radius:18px;overflow:hidden;">
           <tr>
             <td class="email-header" align="center" style="padding:24px 32px 22px;border-top:5px solid #26c8bd;border-bottom:1px solid #e5ebf3;background:#ffffff;">
-              <img class="email-logo" src="__LOGO_SRC__" width="160" alt="CEO Workforce Index" style="display:block;width:160px;max-width:100%;height:auto;margin:0 auto;">
+              <div style="font-size:20px;line-height:1.3;font-weight:700;letter-spacing:.04em;color:#073b87;">CEO Workforce Index</div>
             </td>
           </tr>
           <tr>
@@ -64,7 +57,7 @@ export function buildReportEmail() {
     </tr>
   </table>
 </body>
-</html>`.replaceAll('__LOGO_SRC__', reportEmailLogoDataUri)
+</html>`
 
   const text = `Kính gửi quý Anh/Chị,
 
