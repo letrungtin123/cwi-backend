@@ -26,6 +26,7 @@ type CampaignRow = {
   queued_count: string | number
   sent_count: string | number
   failed_count: string | number
+  unknown_count: string | number
   error_code: string | null
   error_message: string | null
   expires_at: Date
@@ -61,6 +62,7 @@ function mapCampaign(row: CampaignRow): ReportDeliveryCampaign {
     failedCount: count(row.failed_count),
     id: row.id,
     missingPdfUsers: count(row.missing_pdf_users),
+    unknownCount: count(row.unknown_count),
     queuedCount: count(row.queued_count),
     sentCount: count(row.sent_count),
     snapshotAt: row.snapshot_at.toISOString(),
@@ -149,7 +151,7 @@ export class PgReportDeliveryRepository {
       await client.query(
         [
           `UPDATE public.cwi_report_email_jobs`,
-          `SET storage_bucket = $2, storage_path = $3, file_sha256 = $4, status = CASE WHEN status = 'failed' THEN 'queued' ELSE status END, next_attempt_at = now(), published_at = NULL, publish_locked_at = NULL, publish_locked_by = NULL, last_error_code = NULL, last_error_message = NULL, updated_at = now()`,
+          `SET storage_bucket = $2, storage_path = $3, file_sha256 = $4, status = CASE WHEN status IN ('failed', 'unknown') THEN 'queued' ELSE status END, next_attempt_at = now(), published_at = NULL, publish_locked_at = NULL, publish_locked_by = NULL, lease_token = NULL, lease_expires_at = NULL, attempt_started_at = NULL, delivery_unknown_at = NULL, last_error_code = NULL, last_error_message = NULL, updated_at = now()`,
           `WHERE submission_id = $1 AND status NOT IN ('sending', 'sent')`,
         ].join('\n'),
         [input.submissionId, input.storageBucket, input.storagePath, input.sha256],
@@ -167,32 +169,51 @@ export class PgReportDeliveryRepository {
   }
 
   private async countSnapshot(snapshotAt: Date) {
-    const result = await this.pool.query<{ total_users: string; eligible_users: string; missing_pdf_users: string }>(
+    const result = await this.pool.query<{ total_users: string; eligible_users: string; missing_pdf_users: string; unknown_users: string }>(
       [
         `SELECT COUNT(*)::bigint AS total_users,`,
         `       COUNT(*) FILTER (WHERE f.submission_id IS NOT NULL AND f.locked_at IS NULL AND (job.id IS NULL OR job.status = 'failed'))::bigint AS eligible_users,`,
-        `       COUNT(*) FILTER (WHERE f.submission_id IS NULL)::bigint AS missing_pdf_users`,
+        `       COUNT(*) FILTER (WHERE f.submission_id IS NULL)::bigint AS missing_pdf_users,`,
+        `       COUNT(*) FILTER (WHERE job.status = 'unknown')::bigint AS unknown_users`,
         `FROM public.cwi_survey_submissions s LEFT JOIN public.cwi_submission_report_files f ON f.submission_id = s.id`,
         `LEFT JOIN public.cwi_report_email_jobs job ON job.submission_id = s.id`,
         `WHERE s.submitted_at <= $1`,
       ].join('\n'),
       [snapshotAt],
     )
-    const row = result.rows[0] ?? { total_users: '0', eligible_users: '0', missing_pdf_users: '0' }
-    return { eligibleUsers: count(row.eligible_users), missingPdfUsers: count(row.missing_pdf_users), totalUsers: count(row.total_users) }
+    const row = result.rows[0] ?? { total_users: '0', eligible_users: '0', missing_pdf_users: '0', unknown_users: '0' }
+    return { eligibleUsers: count(row.eligible_users), missingPdfUsers: count(row.missing_pdf_users), totalUsers: count(row.total_users), unknownUsers: count(row.unknown_users) }
+  }
+
+  async expireStaleCampaigns() {
+    await this.pool.query(
+      [
+        `WITH expired_campaigns AS (`,
+        `  UPDATE public.cwi_report_delivery_campaigns`,
+        `  SET status = 'expired', updated_at = now()`,
+        `  WHERE status IN ('draft', 'queued', 'dispatching', 'sending') AND expires_at <= now()`,
+        `  RETURNING id`,
+        `)`,
+        `UPDATE public.cwi_report_email_jobs AS job`,
+        `SET status = 'failed', next_attempt_at = now(), published_at = NULL, publish_locked_at = NULL, publish_locked_by = NULL,`,
+        `    last_error_code = 'campaign_expired', last_error_message = 'Đợt gửi email đã hết hạn trước khi bắt đầu gửi.', updated_at = now()`,
+        `FROM expired_campaigns`,
+        `WHERE job.campaign_id = expired_campaigns.id AND job.status = 'queued'`,
+      ].join('\n'),
+    )
   }
 
   async createPreview(requestedBy: string) {
+    await this.expireStaleCampaigns()
     const active = await this.pool.query<CampaignRow>(
-      `SELECT id, requested_by, snapshot_at, status, total_users, eligible_users, missing_pdf_users, queued_count, sent_count, failed_count, error_code, error_message, expires_at, created_at, started_at, completed_at FROM public.cwi_report_delivery_campaigns WHERE status IN ('draft', 'queued', 'dispatching', 'sending') AND expires_at > now() ORDER BY created_at ASC LIMIT 1`,
+      `SELECT id, requested_by, snapshot_at, status, total_users, eligible_users, missing_pdf_users, queued_count, sent_count, failed_count, 0::bigint AS unknown_count, error_code, error_message, expires_at, created_at, started_at, completed_at FROM public.cwi_report_delivery_campaigns WHERE status IN ('draft', 'queued', 'dispatching', 'sending') AND expires_at > now() ORDER BY created_at ASC LIMIT 1`,
     )
     if (active.rows[0]) return mapCampaign(active.rows[0])
-    await this.pool.query(`UPDATE public.cwi_report_delivery_campaigns SET status = 'expired', updated_at = now() WHERE status IN ('draft', 'queued', 'dispatching', 'sending') AND expires_at <= now()`)
     const snapshotAt = new Date()
     const totals = await this.countSnapshot(snapshotAt)
     try {
       const result = await this.pool.query<CampaignRow>(
-        `INSERT INTO public.cwi_report_delivery_campaigns (id, requested_by, snapshot_at, total_users, eligible_users, missing_pdf_users) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, requested_by, snapshot_at, status, total_users, eligible_users, missing_pdf_users, queued_count, sent_count, failed_count, error_code, error_message, expires_at, created_at, started_at, completed_at`,
+        `INSERT INTO public.cwi_report_delivery_campaigns (id, requested_by, snapshot_at, total_users, eligible_users, missing_pdf_users) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, requested_by, snapshot_at, status, total_users, eligible_users, missing_pdf_users, queued_count, sent_count, failed_count, 0::bigint AS unknown_count, error_code, error_message, expires_at, created_at, started_at, completed_at`,
         [randomUUID(), requestedBy, snapshotAt, totals.totalUsers, totals.eligibleUsers, totals.missingPdfUsers],
       )
       const created = result.rows[0]
@@ -200,7 +221,7 @@ export class PgReportDeliveryRepository {
       return mapCampaign(created)
     } catch (error) {
       if (errorCode(error) === '23505') {
-        const retry = await this.pool.query<CampaignRow>(`SELECT id, requested_by, snapshot_at, status, total_users, eligible_users, missing_pdf_users, queued_count, sent_count, failed_count, error_code, error_message, expires_at, created_at, started_at, completed_at FROM public.cwi_report_delivery_campaigns WHERE status IN ('draft', 'queued', 'dispatching', 'sending') ORDER BY created_at ASC LIMIT 1`)
+        const retry = await this.pool.query<CampaignRow>(`SELECT id, requested_by, snapshot_at, status, total_users, eligible_users, missing_pdf_users, queued_count, sent_count, failed_count, 0::bigint AS unknown_count, error_code, error_message, expires_at, created_at, started_at, completed_at FROM public.cwi_report_delivery_campaigns WHERE status IN ('draft', 'queued', 'dispatching', 'sending') AND expires_at > now() ORDER BY created_at ASC LIMIT 1`)
         if (retry.rows[0]) return mapCampaign(retry.rows[0])
       }
       throw error
@@ -211,7 +232,7 @@ export class PgReportDeliveryRepository {
     const result = await this.pool.query<CampaignRow>(
       [
         `SELECT c.id, c.requested_by, c.snapshot_at, c.status, c.total_users, c.eligible_users, c.missing_pdf_users,`,
-        `       COUNT(j.id) FILTER (WHERE j.status = 'queued')::bigint AS queued_count, COUNT(j.id) FILTER (WHERE j.status = 'sent')::bigint AS sent_count, COUNT(j.id) FILTER (WHERE j.status = 'failed')::bigint AS failed_count,`,
+        `       COUNT(j.id) FILTER (WHERE j.status = 'queued')::bigint AS queued_count, COUNT(j.id) FILTER (WHERE j.status = 'sent')::bigint AS sent_count, COUNT(j.id) FILTER (WHERE j.status = 'failed')::bigint AS failed_count, COUNT(j.id) FILTER (WHERE j.status = 'unknown')::bigint AS unknown_count,`,
         `       c.error_code, c.error_message, c.expires_at, c.created_at, c.started_at, c.completed_at`,
         `FROM public.cwi_report_delivery_campaigns c LEFT JOIN public.cwi_report_email_jobs j ON j.campaign_id = c.id`,
         `WHERE c.id = $1 GROUP BY c.id`,
@@ -224,7 +245,7 @@ export class PgReportDeliveryRepository {
 
   async confirmCampaign(id: string, requestedBy: string) {
     const result = await this.pool.query<CampaignRow>(
-      `UPDATE public.cwi_report_delivery_campaigns SET status = 'queued', started_at = now(), updated_at = now() WHERE id = $1 AND requested_by = $2 AND status = 'draft' AND eligible_users > 0 AND expires_at > now() RETURNING id, requested_by, snapshot_at, status, total_users, eligible_users, missing_pdf_users, queued_count, sent_count, failed_count, error_code, error_message, expires_at, created_at, started_at, completed_at`,
+      `UPDATE public.cwi_report_delivery_campaigns SET status = 'queued', started_at = now(), updated_at = now() WHERE id = $1 AND requested_by = $2 AND status = 'draft' AND eligible_users > 0 AND expires_at > now() RETURNING id, requested_by, snapshot_at, status, total_users, eligible_users, missing_pdf_users, queued_count, sent_count, failed_count, 0::bigint AS unknown_count, error_code, error_message, expires_at, created_at, started_at, completed_at`,
       [id, requestedBy],
     )
     if (!result.rows[0]) throw new ReportDeliveryRepositoryError('campaign_not_confirmable', 409, 'Đợt gửi email không còn ở trạng thái có thể xác nhận.')
@@ -235,9 +256,8 @@ export class PgReportDeliveryRepository {
     const result = await this.pool.query<{ id: string }>(
       [
         `SELECT c.id FROM public.cwi_report_delivery_campaigns c`,
-        `WHERE (c.expires_at > now() AND c.status IN ('queued', 'dispatching', 'sending')`,
-        `  OR EXISTS (SELECT 1 FROM public.cwi_report_email_jobs j WHERE j.campaign_id = c.id AND j.status IN ('queued', 'sending'))`,
-        `) ORDER BY c.created_at ASC, c.id ASC LIMIT $1`,
+        `WHERE c.expires_at > now() AND c.status IN ('queued', 'dispatching', 'sending')`,
+        `ORDER BY c.created_at ASC, c.id ASC LIMIT $1`,
       ].join('\n'),
       [limit],
     )
@@ -246,10 +266,17 @@ export class PgReportDeliveryRepository {
 
   async claimCampaign(id: string, lockMs: number) {
     const result = await this.pool.query<{ id: string }>(
-      `UPDATE public.cwi_report_delivery_campaigns SET status = 'dispatching', started_at = COALESCE(started_at, now()), updated_at = now() WHERE id = $1 AND (status = 'queued' OR (status IN ('dispatching', 'sending') AND updated_at < now() - ($2::bigint * interval '1 millisecond'))) RETURNING id`,
+      `UPDATE public.cwi_report_delivery_campaigns SET status = 'dispatching', started_at = COALESCE(started_at, now()), updated_at = now() WHERE id = $1 AND expires_at > now() AND (status = 'queued' OR (status IN ('dispatching', 'sending') AND updated_at < now() - ($2::bigint * interval '1 millisecond'))) RETURNING id`,
       [id, lockMs],
     )
     return result.rows.length > 0
+  }
+
+  async releaseCampaignDispatch(id: string) {
+    await this.pool.query(
+      `UPDATE public.cwi_report_delivery_campaigns SET status = 'queued', updated_at = now() WHERE id = $1 AND status = 'dispatching'`,
+      [id],
+    )
   }
 
   async dispatchBatch(campaignId: string, batchSize: number) {
@@ -282,7 +309,7 @@ export class PgReportDeliveryRepository {
           [
             `INSERT INTO public.cwi_report_email_jobs (campaign_id, submission_id, recipient_email, recipient_name, storage_bucket, storage_path, file_sha256)`,
             `VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            `ON CONFLICT (submission_id) DO UPDATE SET campaign_id = EXCLUDED.campaign_id, recipient_email = EXCLUDED.recipient_email, recipient_name = EXCLUDED.recipient_name, storage_bucket = EXCLUDED.storage_bucket, storage_path = EXCLUDED.storage_path, file_sha256 = EXCLUDED.file_sha256, status = CASE WHEN cwi_report_email_jobs.status = 'failed' THEN 'queued' ELSE cwi_report_email_jobs.status END, next_attempt_at = now(), published_at = NULL, publish_locked_at = NULL, publish_locked_by = NULL, updated_at = now()`,
+            `ON CONFLICT (submission_id) DO UPDATE SET campaign_id = EXCLUDED.campaign_id, recipient_email = EXCLUDED.recipient_email, recipient_name = EXCLUDED.recipient_name, storage_bucket = EXCLUDED.storage_bucket, storage_path = EXCLUDED.storage_path, file_sha256 = EXCLUDED.file_sha256, status = CASE WHEN cwi_report_email_jobs.status = 'failed' THEN 'queued' ELSE cwi_report_email_jobs.status END, next_attempt_at = now(), published_at = NULL, publish_locked_at = NULL, publish_locked_by = NULL, lease_token = NULL, lease_expires_at = NULL, attempt_started_at = NULL, delivery_unknown_at = NULL, last_error_code = NULL, last_error_message = NULL, updated_at = now()`,
             `WHERE cwi_report_email_jobs.status = 'failed'`,
           ].join('\n'),
           [campaignId, row.id, row.email, row.full_name, row.storage_bucket, row.storage_path, row.sha256],
@@ -308,7 +335,7 @@ export class PgReportDeliveryRepository {
   async claimUnpublished(campaignId: string, limit: number, workerId: string, lockMs: number) {
     const result = await this.pool.query<{ id: string }>(
       [
-        `WITH candidates AS (SELECT id FROM public.cwi_report_email_jobs WHERE campaign_id = $1 AND status = 'queued' AND (published_at IS NULL OR published_at < now() - ($3::bigint * interval '1 millisecond')) AND (publish_locked_at IS NULL OR publish_locked_at < now() - ($3::bigint * interval '1 millisecond')) ORDER BY id LIMIT $2 FOR UPDATE SKIP LOCKED)`,
+        `WITH candidates AS (SELECT id FROM public.cwi_report_email_jobs WHERE campaign_id = $1 AND status = 'queued' AND next_attempt_at <= now() AND (published_at IS NULL OR published_at < now() - ($3::bigint * interval '1 millisecond')) AND (publish_locked_at IS NULL OR publish_locked_at < now() - ($3::bigint * interval '1 millisecond')) ORDER BY id LIMIT $2 FOR UPDATE SKIP LOCKED)`,
         `UPDATE public.cwi_report_email_jobs j SET publish_locked_at = now(), publish_locked_by = $4 FROM candidates WHERE j.id = candidates.id RETURNING j.id`,
       ].join('\n'),
       [campaignId, limit, lockMs, workerId],
@@ -327,29 +354,35 @@ export class PgReportDeliveryRepository {
   }
 
   async claimJob(id: string, workerId: string, lockMs: number): Promise<ClaimedEmailJob | null> {
+    const leaseToken = randomUUID()
     const result = await this.pool.query<{ id: string; campaign_id: string; submission_id: string; recipient_email: string; recipient_name: string; storage_bucket: string; storage_path: string; file_sha256: string; attempt_count: number; original_file_name: string | null }>(
       [
-        `WITH candidate AS (SELECT j.id FROM public.cwi_report_email_jobs j JOIN public.cwi_submission_report_files f ON f.submission_id = j.submission_id AND f.storage_path = j.storage_path WHERE j.id = $1 AND ((j.status = 'queued' AND j.next_attempt_at <= now()) OR (j.status = 'sending' AND j.locked_at < now() - ($3::bigint * interval '1 millisecond'))) FOR UPDATE OF j SKIP LOCKED),`,
+        `WITH candidate AS (SELECT j.id FROM public.cwi_report_email_jobs j JOIN public.cwi_submission_report_files f ON f.submission_id = j.submission_id AND f.storage_path = j.storage_path WHERE j.id = $1 AND j.status = 'queued' AND j.next_attempt_at <= now() FOR UPDATE OF j SKIP LOCKED),`,
         `updated AS (`,
-        `  UPDATE public.cwi_report_email_jobs j SET status = 'sending', attempt_count = j.attempt_count + 1, locked_at = now(), locked_by = $2, last_error_code = NULL, last_error_message = NULL FROM candidate WHERE j.id = candidate.id`,
+        `  UPDATE public.cwi_report_email_jobs j SET status = 'sending', attempt_count = j.attempt_count + 1, locked_at = now(), locked_by = $2, lease_token = $4, lease_expires_at = now() + ($3::bigint * interval '1 millisecond'), attempt_started_at = now(), delivery_unknown_at = NULL, last_error_code = NULL, last_error_message = NULL FROM candidate WHERE j.id = candidate.id`,
         `  RETURNING j.id, j.campaign_id, j.submission_id, j.recipient_email, j.recipient_name, j.storage_bucket, j.storage_path, j.file_sha256, j.attempt_count`,
         `)`,
         `SELECT updated.id, updated.campaign_id, updated.submission_id, updated.recipient_email, updated.recipient_name, updated.storage_bucket, updated.storage_path, updated.file_sha256, updated.attempt_count, f.original_file_name`,
         `FROM updated JOIN public.cwi_submission_report_files f ON f.submission_id = updated.submission_id AND f.storage_path = updated.storage_path`,
       ].join('\n'),
-      [id, workerId, lockMs],
+      [id, workerId, lockMs, leaseToken],
     )
     const row = result.rows[0]
-    return row ? { attemptCount: Number(row.attempt_count), campaignId: row.campaign_id, fileSha256: row.file_sha256, id: row.id, originalFileName: row.original_file_name ?? 'bao-cao-ceo-workforce-index.pdf', recipientEmail: row.recipient_email, recipientName: row.recipient_name, storageBucket: row.storage_bucket, storagePath: row.storage_path, submissionId: row.submission_id } : null
+    return row ? { attemptCount: Number(row.attempt_count), campaignId: row.campaign_id, fileSha256: row.file_sha256, id: row.id, leaseToken, originalFileName: row.original_file_name ?? 'bao-cao-ceo-workforce-index.pdf', recipientEmail: row.recipient_email, recipientName: row.recipient_name, storageBucket: row.storage_bucket, storagePath: row.storage_path, submissionId: row.submission_id } : null
   }
 
-  async markSent(jobId: string, providerMessageId: string) {
+  async markSent(jobId: string, leaseToken: string, providerMessageId: string) {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
-      await client.query(`UPDATE public.cwi_report_email_jobs SET status = 'sent', sent_at = now(), provider_message_id = $2, locked_at = NULL, locked_by = NULL, updated_at = now() WHERE id = $1 AND status = 'sending'`, [jobId, providerMessageId.slice(0, 500)])
-      await client.query(`UPDATE public.cwi_submission_report_files SET locked_at = now(), updated_at = now() WHERE submission_id = (SELECT submission_id FROM public.cwi_report_email_jobs WHERE id = $1) AND locked_at IS NULL`, [jobId])
+      const updated = await client.query<{ submission_id: string }>(`UPDATE public.cwi_report_email_jobs SET status = 'sent', sent_at = now(), provider_message_id = $3, locked_at = NULL, locked_by = NULL, lease_token = NULL, lease_expires_at = NULL, updated_at = now() WHERE id = $1 AND status = 'sending' AND lease_token = $2 RETURNING submission_id`, [jobId, leaseToken, providerMessageId.slice(0, 500)])
+      if (!updated.rows[0]) {
+        await client.query('COMMIT')
+        return false
+      }
+      await client.query(`UPDATE public.cwi_submission_report_files SET locked_at = now(), updated_at = now() WHERE submission_id = $1 AND locked_at IS NULL`, [updated.rows[0].submission_id])
       await client.query('COMMIT')
+      return true
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined)
       throw error
@@ -358,13 +391,30 @@ export class PgReportDeliveryRepository {
     }
   }
 
-  async markFailed(jobId: string, attempt: number, code: string, message: string, maxAttempts: number) {
+  async markFailed(jobId: string, leaseToken: string, attempt: number, code: string, message: string, maxAttempts: number) {
     const retry = attempt < maxAttempts
     const delay = Math.min(3600, 30 * (2 ** Math.max(0, attempt - 1)))
-    await this.pool.query(
-      `UPDATE public.cwi_report_email_jobs SET status = CASE WHEN $5::boolean THEN 'queued' ELSE 'failed' END, next_attempt_at = now() + ($2::integer * interval '1 second'), published_at = CASE WHEN $5::boolean THEN NULL ELSE published_at END, locked_at = NULL, locked_by = NULL, last_error_code = $3, last_error_message = $4, updated_at = now() WHERE id = $1 AND status = 'sending'`,
-      [jobId, delay, code.slice(0, 100), message.slice(0, 1000), retry],
+    const result = await this.pool.query<{ id: string }>(
+      `UPDATE public.cwi_report_email_jobs SET status = CASE WHEN $6::boolean THEN 'queued' ELSE 'failed' END, next_attempt_at = now() + ($3::integer * interval '1 second'), published_at = CASE WHEN $6::boolean THEN NULL ELSE published_at END, locked_at = NULL, locked_by = NULL, lease_token = NULL, lease_expires_at = NULL, attempt_started_at = NULL, last_error_code = $4, last_error_message = $5, updated_at = now() WHERE id = $1 AND status = 'sending' AND lease_token = $2 RETURNING id`,
+      [jobId, leaseToken, delay, code.slice(0, 100), message.slice(0, 1000), retry],
     )
+    return result.rows.length > 0
+  }
+
+  async markUnknown(jobId: string, leaseToken: string, code: string, message: string) {
+    const result = await this.pool.query<{ id: string }>(
+      `UPDATE public.cwi_report_email_jobs SET status = 'unknown', delivery_unknown_at = now(), locked_at = NULL, locked_by = NULL, lease_token = NULL, lease_expires_at = NULL, attempt_started_at = NULL, last_error_code = $3, last_error_message = $4, updated_at = now() WHERE id = $1 AND status = 'sending' AND lease_token = $2 RETURNING id`,
+      [jobId, leaseToken, code.slice(0, 100), message.slice(0, 1000)],
+    )
+    return result.rows.length > 0
+  }
+
+  async recoverStaleSendingJobs(lockMs: number) {
+    const result = await this.pool.query<{ campaign_id: string }>(
+      `UPDATE public.cwi_report_email_jobs SET status = 'unknown', delivery_unknown_at = now(), locked_at = NULL, locked_by = NULL, lease_token = NULL, lease_expires_at = NULL, attempt_started_at = NULL, last_error_code = 'delivery_ambiguous', last_error_message = 'Không xác định được kết quả SMTP sau khi lease của worker hết hạn.', updated_at = now() WHERE status = 'sending' AND COALESCE(lease_expires_at, locked_at + ($1::bigint * interval '1 millisecond')) < now() RETURNING campaign_id`,
+      [lockMs],
+    )
+    return [...new Set(result.rows.map((row) => row.campaign_id))]
   }
 
   async refreshCampaign(id: string) {
@@ -374,6 +424,7 @@ export class PgReportDeliveryRepository {
         `  SELECT COUNT(*) FILTER (WHERE status = 'queued')::bigint AS queued_count,`,
         `         COUNT(*) FILTER (WHERE status = 'sent')::bigint AS sent_count,`,
         `         COUNT(*) FILTER (WHERE status = 'failed')::bigint AS failed_count,`,
+        `         COUNT(*) FILTER (WHERE status = 'unknown')::bigint AS unknown_count,`,
         `         COUNT(*) FILTER (WHERE status = 'sending')::bigint AS sending_count`,
         `  FROM public.cwi_report_email_jobs WHERE campaign_id = $1`,
         `)`,
@@ -381,11 +432,13 @@ export class PgReportDeliveryRepository {
         `SET queued_count = counts.queued_count,`,
         `    sent_count = counts.sent_count,`,
         `    failed_count = counts.failed_count,`,
+        `    error_code = CASE WHEN counts.unknown_count > 0 THEN 'delivery_ambiguous' ELSE campaign.error_code END,`,
+        `    error_message = CASE WHEN counts.unknown_count > 0 THEN 'Có email chưa xác định được kết quả SMTP; cần kiểm tra trước khi gửi lại.' ELSE campaign.error_message END,`,
         `    status = CASE`,
         `      WHEN counts.queued_count > 0 OR counts.sending_count > 0 THEN`,
         `        CASE WHEN campaign.status IN ('completed', 'failed', 'expired') THEN 'sending' ELSE campaign.status END`,
         `      WHEN campaign.status IN ('dispatching', 'sending') THEN`,
-        `        CASE WHEN counts.failed_count > 0 THEN 'failed' ELSE 'completed' END`,
+        `        CASE WHEN counts.failed_count > 0 OR counts.unknown_count > 0 THEN 'failed' ELSE 'completed' END`,
         `      ELSE campaign.status`,
         `    END,`,
         `    completed_at = CASE`,

@@ -77,6 +77,10 @@ const reportMailer = new SmtpReportMailer({
   fromAddress: env.mailFromAddress,
   fromName: env.mailFromName,
   host: env.mailSmtpHost,
+  connectionTimeoutMs: env.mailSmtpConnectionTimeoutMs,
+  greetingTimeoutMs: env.mailSmtpGreetingTimeoutMs,
+  maxConnections: env.mailSmtpMaxConnections,
+  maxMessages: env.mailSmtpMaxMessages,
   m365ClientId: env.mailM365ClientId,
   m365ClientSecret: env.mailM365ClientSecret,
   m365Scope: env.mailM365Scope,
@@ -88,6 +92,7 @@ const reportMailer = new SmtpReportMailer({
   secure: env.mailSmtpSecure,
   tokenTimeoutMs: env.mailM365TokenTimeoutMs,
   user: env.mailSmtpUser,
+  socketTimeoutMs: env.mailSmtpSocketTimeoutMs,
 })
 
 const surveyService = new SurveyService(surveyRepository)
@@ -106,6 +111,7 @@ async function shutdown(signal: string) {
       process.exitCode = 1
     }
     await pool.end()
+    reportMailer.close()
     process.exit()
   })
 }

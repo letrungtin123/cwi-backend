@@ -72,13 +72,23 @@ describe("report delivery queue recovery", () => {
     expect(String(query.mock.calls[0]?.[0])).toContain("published_at IS NULL OR published_at < now()")
   })
 
-  it("keeps campaigns with queued jobs eligible for recovery", async () => {
+  it("only lists unexpired campaigns for recovery", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [{ id: "campaign-id" }] })
     const repository = new PgReportDeliveryRepository({ query } as unknown as pg.Pool)
 
     await expect(repository.listActiveCampaigns(20)).resolves.toEqual(["campaign-id"])
-    expect(String(query.mock.calls[0]?.[0])).toContain("EXISTS")
-    expect(String(query.mock.calls[0]?.[0])).toContain("j.status IN ('queued', 'sending')")
+    expect(String(query.mock.calls[0]?.[0])).toContain("c.expires_at > now()")
+    expect(String(query.mock.calls[0]?.[0])).not.toContain("EXISTS")
+  })
+
+  it("expires stale campaigns and makes queued jobs retryable", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] })
+    const repository = new PgReportDeliveryRepository({ query } as unknown as pg.Pool)
+
+    await repository.expireStaleCampaigns()
+    expect(query).toHaveBeenCalledOnce()
+    expect(String(query.mock.calls[0]?.[0])).toContain("job.status = 'queued'")
+    expect(String(query.mock.calls[0]?.[0])).toContain("SET status = 'failed'")
   })
 
   it("refreshes campaign counters and status atomically", async () => {

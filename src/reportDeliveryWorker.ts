@@ -10,7 +10,7 @@ import { env } from './config/env.js'
 import { createDbPool } from './db/pool.js'
 import { createLogger } from './logger.js'
 import { PgReportDeliveryRepository } from './modules/reportDelivery/reportDeliveryRepository.js'
-import { SmtpReportMailer } from './modules/reportDelivery/smtpMailer.js'
+import { SmtpDeliveryError, SmtpReportMailer } from './modules/reportDelivery/smtpMailer.js'
 import { ReportAssetStorage } from './modules/reports/reportAssetStorage.js'
 
 const logger = createLogger(env.logLevel)
@@ -92,21 +92,34 @@ async function consumeSend(repository: PgReportDeliveryRepository, storage: Repo
   if (!job) return
   const directory = await mkdtemp(join(tmpdir(), 'cwi-report-delivery-'))
   const pdfPath = join(directory, 'report.pdf')
+  let smtpAccepted = false
   try {
     if (job.storageBucket !== env.reportDeliveryBucket) throw new Error('PDF storage bucket does not match the configured delivery bucket.')
     await downloadPdf(storage, job.storagePath, job.fileSha256, pdfPath)
     const fromDomain = env.mailFromAddress.split('@')[1] ?? 'ceo-workforce-index.com'
     const messageId = '<cwi-report-' + job.submissionId + '@' + fromDomain + '>'
     const providerMessageId = await mailer.send({ messageId, originalFileName: job.originalFileName, pdfPath, recipientEmail: job.recipientEmail, recipientName: job.recipientName })
-    await repository.markSent(job.id, providerMessageId)
+    smtpAccepted = true
+    const markedSent = await repository.markSent(job.id, job.leaseToken, providerMessageId)
+    if (!markedSent) {
+      logger.warn({ campaignId: job.campaignId, jobId: job.id }, 'SMTP accepted the report but the worker lease was already lost')
+      return
+    }
     await repository.refreshCampaign(job.campaignId)
     logger.info({ campaignId: job.campaignId, jobId: job.id, submissionId: job.submissionId }, 'Report email sent')
     await sleep(Math.ceil(1000 / env.mailSendRatePerSecond))
   } catch (error) {
     const messageText = error instanceof Error ? error.message : 'Gửi email thất bại.'
-    await repository.markFailed(job.id, job.attemptCount, 'smtp_delivery_failed', messageText, env.reportDeliveryMaxAttempts)
+    const deliveryUnknown = smtpAccepted || (error instanceof SmtpDeliveryError && error.outcome === 'unknown')
+    const marked = deliveryUnknown
+      ? await repository.markUnknown(job.id, job.leaseToken, 'delivery_ambiguous', messageText)
+      : await repository.markFailed(job.id, job.leaseToken, job.attemptCount, error instanceof SmtpDeliveryError ? 'smtp_not_sent' : 'delivery_failed', messageText, env.reportDeliveryMaxAttempts)
+    if (!marked) {
+      logger.warn({ campaignId: job.campaignId, jobId: job.id }, 'Delivery result was already finalized by another worker')
+      return
+    }
     await repository.refreshCampaign(job.campaignId)
-    logger.error({ error, jobId: job.id, attempt: job.attemptCount }, 'Report email failed')
+    logger.error({ error, jobId: job.id, attempt: job.attemptCount, deliveryUnknown }, 'Report email failed')
   } finally {
     await rm(directory, { force: true, recursive: true })
   }
@@ -138,6 +151,10 @@ async function run() {
     fromAddress: env.mailFromAddress,
     fromName: env.mailFromName,
     host: env.mailSmtpHost,
+    connectionTimeoutMs: env.mailSmtpConnectionTimeoutMs,
+    greetingTimeoutMs: env.mailSmtpGreetingTimeoutMs,
+    maxConnections: env.mailSmtpMaxConnections,
+    maxMessages: env.mailSmtpMaxMessages,
     m365ClientId: env.mailM365ClientId,
     m365ClientSecret: env.mailM365ClientSecret,
     m365Scope: env.mailM365Scope,
@@ -149,7 +166,9 @@ async function run() {
     secure: env.mailSmtpSecure,
     tokenTimeoutMs: env.mailM365TokenTimeoutMs,
     user: env.mailSmtpUser,
+    socketTimeoutMs: env.mailSmtpSocketTimeoutMs,
   })
+  await mailer.verify()
   const connection = await amqp.connect(env.rabbitmqUrl)
   const channel = await connection.createConfirmChannel()
   const dispatchConsumer = await connection.createChannel()
@@ -164,15 +183,32 @@ async function run() {
 
   await dispatchConsumer.consume(dispatchQueue, (message) => {
     if (!message) return
-    void consumeDispatch(channel, repository, message).catch((error) => logger.error({ error }, 'Dispatch message failed')).finally(() => dispatchConsumer.ack(message))
+    void consumeDispatch(channel, repository, message)
+      .then(() => dispatchConsumer.ack(message))
+      .catch(async (error) => {
+        const { campaignId } = messageJson(message)
+        if (campaignId) await repository.releaseCampaignDispatch(campaignId).catch((releaseError) => logger.error({ error: releaseError, campaignId }, 'Dispatch lease release failed'))
+        logger.error({ error, campaignId }, 'Dispatch message failed; requeueing')
+        await sleep(env.reportDeliveryRequeueDelayMs)
+        dispatchConsumer.nack(message, false, true)
+      })
   })
   await sendConsumer.consume(sendQueue, (message) => {
     if (!message) return
-    void consumeSend(repository, storage, mailer, message).catch((error) => logger.error({ error }, 'Send message failed')).finally(() => sendConsumer.ack(message))
+    void consumeSend(repository, storage, mailer, message)
+      .then(() => sendConsumer.ack(message))
+      .catch(async (error) => {
+        logger.error({ error }, 'Send message failed; requeueing')
+        await sleep(env.reportDeliveryRequeueDelayMs)
+        sendConsumer.nack(message, false, true)
+      })
   })
 
   try {
     while (!stopping) {
+      await repository.expireStaleCampaigns()
+      const recoveredCampaigns = await repository.recoverStaleSendingJobs(env.reportDeliveryLockMs)
+      for (const campaignId of recoveredCampaigns) await repository.refreshCampaign(campaignId)
       const campaigns = await repository.listActiveCampaigns(10)
       for (const campaignId of campaigns) {
         await publishCampaign(channel, campaignId)
@@ -186,6 +222,7 @@ async function run() {
     await sendConsumer.close().catch(() => undefined)
     await channel.close().catch(() => undefined)
     await connection.close().catch(() => undefined)
+    mailer.close()
     await pool.end()
   }
 }

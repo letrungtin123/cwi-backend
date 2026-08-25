@@ -1,4 +1,4 @@
-export type DeliveryEmailStatus = 'not_sent' | 'queued' | 'sending' | 'sent' | 'failed'
+export type DeliveryEmailStatus = 'not_sent' | 'queued' | 'sending' | 'sent' | 'failed' | 'unknown'
 
 export type ReportDeliveryFile = {
   available: boolean
@@ -26,6 +26,7 @@ export type ReportDeliveryCampaign = {
   failedCount: number
   id: string
   missingPdfUsers: number
+  unknownCount: number
   queuedCount: number
   sentCount: number
   snapshotAt: string
@@ -40,6 +41,7 @@ export type ClaimedEmailJob = {
   campaignId: string
   fileSha256: string
   id: string
+  leaseToken: string
   originalFileName: string
   recipientEmail: string
   recipientName: string

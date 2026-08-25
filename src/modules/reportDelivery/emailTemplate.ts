@@ -1,7 +1,8 @@
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-export const reportEmailLogoCid = 'cwi-logo@ceo-workforce-index.com'
 export const reportEmailLogoPath = fileURLToPath(new URL('./assets/cwi-logo.svg', import.meta.url))
+const reportEmailLogoDataUri = 'data:image/svg+xml;base64,' + readFileSync(reportEmailLogoPath).toString('base64')
 
 export function buildReportEmail() {
   const html = `<!doctype html>
@@ -28,7 +29,7 @@ export function buildReportEmail() {
         <table role="presentation" class="email-shell" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:680px;background:#ffffff;border:1px solid #dce5f0;border-radius:18px;overflow:hidden;">
           <tr>
             <td class="email-header" align="center" style="padding:24px 32px 22px;border-top:5px solid #26c8bd;border-bottom:1px solid #e5ebf3;background:#ffffff;">
-              <img class="email-logo" src="cid:__LOGO_CID__" width="160" alt="CEO Workforce Index" style="display:block;width:160px;max-width:100%;height:auto;margin:0 auto;">
+              <img class="email-logo" src="__LOGO_SRC__" width="160" alt="CEO Workforce Index" style="display:block;width:160px;max-width:100%;height:auto;margin:0 auto;">
             </td>
           </tr>
           <tr>
@@ -63,7 +64,7 @@ export function buildReportEmail() {
     </tr>
   </table>
 </body>
-</html>`.replaceAll('__LOGO_CID__', reportEmailLogoCid)
+</html>`.replaceAll('__LOGO_SRC__', reportEmailLogoDataUri)
 
   const text = `Kính gửi quý Anh/Chị,
 

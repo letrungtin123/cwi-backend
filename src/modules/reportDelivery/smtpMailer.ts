@@ -1,11 +1,12 @@
 import nodemailer, { type Transporter } from 'nodemailer'
-import { buildReportEmail, reportEmailLogoCid, reportEmailLogoPath } from './emailTemplate.js'
+import { buildReportEmail } from './emailTemplate.js'
 import { normalizeReportFileName } from './reportDeliveryFilename.js'
 
 export type SmtpAuthMode = 'basic' | 'microsoft365-oauth2'
 
 export type SmtpMailerConfig = {
   authMode: SmtpAuthMode
+  connectionTimeoutMs: number
   fromAddress: string
   fromName: string
   host: string
@@ -13,6 +14,9 @@ export type SmtpMailerConfig = {
   m365ClientSecret: string
   m365Scope: string
   m365TenantId: string
+  greetingTimeoutMs: number
+  maxConnections: number
+  maxMessages: number
   password: string
   port: number
   replyTo: string
@@ -20,6 +24,7 @@ export type SmtpMailerConfig = {
   secure: boolean
   tokenTimeoutMs: number
   user: string
+  socketTimeoutMs: number
 }
 
 export function buildReportPdfAttachment(input: { originalFileName: string; pdfPath: string }) {
@@ -28,16 +33,6 @@ export function buildReportPdfAttachment(input: { originalFileName: string; pdfP
     contentType: 'application/pdf',
     filename: normalizeReportFileName(input.originalFileName),
     path: input.pdfPath,
-  }
-}
-
-export function buildReportLogoAttachment() {
-  return {
-    cid: reportEmailLogoCid,
-    contentDisposition: 'inline' as const,
-    contentType: 'image/svg+xml',
-    filename: 'cwi-logo.svg',
-    path: reportEmailLogoPath,
   }
 }
 
@@ -99,8 +94,32 @@ export class Microsoft365OAuthTokenProvider {
   }
 }
 
+export type SmtpDeliveryOutcome = 'not_sent' | 'unknown'
+
+export class SmtpDeliveryError extends Error {
+  constructor(readonly outcome: SmtpDeliveryOutcome, message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = 'SmtpDeliveryError'
+  }
+}
+
+function classifySmtpError(error: unknown) {
+  if (error instanceof SmtpDeliveryError) return error
+  const value = error as { code?: unknown; command?: unknown; responseCode?: unknown } | null
+  const code = typeof value?.code === 'string' ? value.code : ''
+  const command = typeof value?.command === 'string' ? value.command.toUpperCase() : ''
+  const responseCode = typeof value?.responseCode === 'number' ? value.responseCode : Number(value?.responseCode)
+  const serverRejectedBeforeData = Number.isFinite(responseCode) && responseCode >= 400 && responseCode < 600 && !['DATA', 'END'].includes(command)
+  if (serverRejectedBeforeData || ['EAUTH', 'ECONNECTION', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(code)) {
+    return new SmtpDeliveryError('not_sent', 'SMTP từ chối kết nối hoặc thư trước khi nhận nội dung.', { cause: error })
+  }
+  return new SmtpDeliveryError('unknown', 'Không xác định được SMTP đã nhận thư hay chưa.', { cause: error })
+}
+
 export class SmtpReportMailer {
   private readonly oauthTokenProvider: Microsoft365OAuthTokenProvider | null
+  private transporter: Transporter | null = null
+  private transporterPromise: Promise<Transporter> | null = null
 
   constructor(private readonly config: SmtpMailerConfig) {
     this.oauthTokenProvider = config.authMode === 'microsoft365-oauth2'
@@ -129,7 +148,13 @@ export class SmtpReportMailer {
     return nodemailer.createTransport({
       auth,
       host: this.config.host,
+      pool: true,
       port: this.config.port,
+      maxConnections: this.config.maxConnections,
+      maxMessages: this.config.maxMessages,
+      connectionTimeout: this.config.connectionTimeoutMs,
+      greetingTimeout: this.config.greetingTimeoutMs,
+      socketTimeout: this.config.socketTimeoutMs,
       requireTLS: this.config.requireTls,
       secure: this.config.secure,
       tls: {
@@ -139,24 +164,32 @@ export class SmtpReportMailer {
     })
   }
 
-  async verify() {
-    const transporter = await this.createTransport()
-    try {
-      await transporter.verify()
-    } finally {
-      transporter.close()
+  private async getTransport() {
+    if (this.transporter) return this.transporter
+    if (!this.transporterPromise) {
+      this.transporterPromise = this.createTransport()
+        .then((transporter) => {
+          this.transporter = transporter
+          return transporter
+        })
+        .catch((error) => {
+          this.transporterPromise = null
+          throw error
+        })
     }
+    return this.transporterPromise
+  }
+
+  async verify() {
+    await (await this.getTransport()).verify()
   }
 
   async send(input: { messageId: string; originalFileName: string; pdfPath: string; recipientEmail: string; recipientName: string }) {
-    const transporter = await this.createTransport()
+    const transporter = await this.getTransport()
     try {
       const { html, text } = buildReportEmail()
       const info = await transporter.sendMail({
-        attachments: [
-          buildReportPdfAttachment({ originalFileName: input.originalFileName, pdfPath: input.pdfPath }),
-          buildReportLogoAttachment(),
-        ],
+        attachments: [buildReportPdfAttachment({ originalFileName: input.originalFileName, pdfPath: input.pdfPath })],
         from: { address: this.config.fromAddress, name: this.config.fromName },
         html,
         messageId: input.messageId,
@@ -166,8 +199,16 @@ export class SmtpReportMailer {
         to: input.recipientEmail,
       })
       return info.messageId
-    } finally {
-      transporter.close()
+    } catch (error) {
+      const smtpError = error as { code?: unknown } | null
+      if (this.config.authMode === 'microsoft365-oauth2' && smtpError?.code === 'EAUTH') this.close()
+      throw classifySmtpError(error)
     }
+  }
+
+  close() {
+    this.transporter?.close()
+    this.transporter = null
+    this.transporterPromise = null
   }
 }
