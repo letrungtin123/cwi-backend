@@ -85,6 +85,13 @@ function parseRoundtable(value: unknown) {
   throw new HttpError(400, 'invalid_roundtable_filter', 'roundtable filter must be true or false.')
 }
 
+export function parseReportPdfUploaded(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  if (value === 'true') return true
+  if (value === 'false') return false
+  throw new HttpError(400, 'invalid_report_pdf_uploaded_filter', 'reportPdfUploaded filter must be true or false.')
+}
+
 function parseRoundtableLinkStatus(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
   if (validRoundtableLinkStatuses.has(value)) return value as 'linked' | 'standalone'
@@ -236,6 +243,7 @@ export function createAdminRouter(
       const result = await repository.listSubmissionDetails({
         limit,
         page,
+        reportPdfUploaded: parseReportPdfUploaded(req.query.reportPdfUploaded),
         roundtableRegistered: parseRoundtable(req.query.roundtable),
         search: parseSearch(req.query.search),
         status: parseStatus(req.query.status),

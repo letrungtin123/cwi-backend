@@ -49,12 +49,14 @@ export type SubmissionDetail = SubmissionListItem & {
 
 export type SubmissionFullItem = SubmissionListItem & {
   answers: SubmissionDetail['answers']
+  reportPdfUploaded: boolean
   roundtableRegistration: SubmissionDetail['roundtableRegistration']
 }
 
 export type SubmissionDetailListFilters = {
   limit: number
   page: number
+  reportPdfUploaded: boolean | null
   roundtableRegistered: boolean | null
   search: string | null
   status: string | null
@@ -76,6 +78,7 @@ type SubmissionRow = {
   privacy_consent: string
   report_job_id: string | null
   report_last_error_message: string | null
+  report_pdf_uploaded: boolean
   report_pdf_storage_path: string | null
   report_status: string | null
   report_updated_at: Date | null
@@ -236,6 +239,11 @@ const submissionSelect = `
     s.answers_count,
     s.roundtable_registered,
     s.submitted_at,
+    EXISTS (
+      SELECT 1
+      FROM public.cwi_submission_report_files AS uploaded_report
+      WHERE uploaded_report.submission_id = s.id
+    ) AS report_pdf_uploaded,
     report.id AS report_job_id,
     report.status AS report_status,
     report.updated_at AS report_updated_at,
@@ -475,6 +483,47 @@ function toNumber(value: string | null) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function appendSubmissionDetailFilters(
+  where: string[],
+  params: unknown[],
+  filters: SubmissionDetailListFilters,
+) {
+  if (filters.status) {
+    params.push(filters.status)
+    where.push('s.submission_status = $' + params.length)
+  }
+
+  if (filters.roundtableRegistered !== null) {
+    params.push(filters.roundtableRegistered)
+    where.push('s.roundtable_registered = $' + params.length)
+  }
+
+  if (filters.search) {
+    params.push('%' + filters.search + '%')
+    where.push(
+      '(s.full_name ILIKE $' + params.length +
+        ' OR s.email ILIKE $' + params.length +
+        ' OR s.position ILIKE $' + params.length + ')',
+    )
+  }
+
+  if (filters.reportPdfUploaded !== null) {
+    where.push(
+      filters.reportPdfUploaded
+        ? `EXISTS (
+             SELECT 1
+             FROM public.cwi_submission_report_files AS uploaded_report
+             WHERE uploaded_report.submission_id = s.id
+           )`
+        : `NOT EXISTS (
+             SELECT 1
+             FROM public.cwi_submission_report_files AS uploaded_report
+             WHERE uploaded_report.submission_id = s.id
+           )`,
+    )
+  }
+}
+
 export class PgAdminRepository {
   private roundtableStatsCache: TimedCache<RoundtableRegistrationStats> | null = null
   private submissionStatsCache: TimedCache<SubmissionStats> | null = null
@@ -653,21 +702,7 @@ export class PgAdminRepository {
   async listSubmissionDetails(filters: SubmissionDetailListFilters): Promise<SubmissionDetailListResult> {
     const pageParams: unknown[] = []
     const pageWhere: string[] = []
-
-    if (filters.status) {
-      pageParams.push(filters.status)
-      pageWhere.push('s.submission_status = $' + pageParams.length)
-    }
-
-    if (filters.roundtableRegistered !== null) {
-      pageParams.push(filters.roundtableRegistered)
-      pageWhere.push('s.roundtable_registered = $' + pageParams.length)
-    }
-
-    if (filters.search) {
-      pageParams.push('%' + filters.search + '%')
-      pageWhere.push('(s.full_name ILIKE $' + pageParams.length + ' OR s.email ILIKE $' + pageParams.length + ' OR s.position ILIKE $' + pageParams.length + ')')
-    }
+    appendSubmissionDetailFilters(pageWhere, pageParams, filters)
 
     const pageWhereSql = pageWhere.length ? pageWhere.join(' AND ') : 'TRUE'
     const offset = (filters.page - 1) * filters.limit
@@ -678,21 +713,7 @@ export class PgAdminRepository {
 
     const countParams: unknown[] = []
     const countWhere: string[] = []
-
-    if (filters.status) {
-      countParams.push(filters.status)
-      countWhere.push('s.submission_status = $' + countParams.length)
-    }
-
-    if (filters.roundtableRegistered !== null) {
-      countParams.push(filters.roundtableRegistered)
-      countWhere.push('s.roundtable_registered = $' + countParams.length)
-    }
-
-    if (filters.search) {
-      countParams.push('%' + filters.search + '%')
-      countWhere.push('(s.full_name ILIKE $' + countParams.length + ' OR s.email ILIKE $' + countParams.length + ' OR s.position ILIKE $' + countParams.length + ')')
-    }
+    appendSubmissionDetailFilters(countWhere, countParams, filters)
 
     const countWhereSql = countWhere.length ? countWhere.join(' AND ') : 'TRUE'
     const [pageResult, countResult] = await Promise.all([
@@ -746,6 +767,7 @@ export class PgAdminRepository {
         const roundtable = roundtableBySubmission.get(row.id)
         return {
           ...mapListItem(row),
+          reportPdfUploaded: row.report_pdf_uploaded,
           answers: (answersBySubmission.get(row.id) ?? []).map((answer) => ({
             answerText: answer.answer_text,
             answerValue: answer.answer_value,
