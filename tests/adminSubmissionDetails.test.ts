@@ -76,4 +76,24 @@ describe('full submission PDF status', () => {
     expect(submissionQueries).toHaveLength(2)
     expect(submissionQueries.every((sql) => sql.includes('NOT EXISTS'))).toBe(true)
   })
+
+  it('applies the PDF filter to the cursor page query', async () => {
+    const { query, repository } = createRepository()
+
+    await repository.listSubmissionsPage({
+      before: null,
+      beforeId: null,
+      limit: 10,
+      reportPdfUploaded: false,
+      roundtableRegistered: null,
+      search: null,
+      status: null,
+    })
+
+    const pageQuery = query.mock.calls
+      .map(([sql]) => sql)
+      .find((sql) => sql.includes('ORDER BY s.submitted_at DESC, s.id DESC'))
+    expect(pageQuery).toContain('NOT EXISTS')
+    expect(pageQuery).toContain('cwi_submission_report_files')
+  })
 })

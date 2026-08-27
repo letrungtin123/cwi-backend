@@ -112,6 +112,7 @@ export type SubmissionListFilters = {
   before: Date | null
   beforeId: string | null
   limit: number
+  reportPdfUploaded: boolean | null
   roundtableRegistered: boolean | null
   search: string | null
   status: string | null
@@ -664,6 +665,22 @@ export class PgAdminRepository {
     if (filters.roundtableRegistered !== null) {
       params.push(filters.roundtableRegistered)
       where.push('s.roundtable_registered = $' + params.length)
+    }
+
+    if (filters.reportPdfUploaded !== null) {
+      where.push(
+        filters.reportPdfUploaded
+          ? `EXISTS (
+               SELECT 1
+               FROM public.cwi_submission_report_files AS uploaded_report
+               WHERE uploaded_report.submission_id = s.id
+             )`
+          : `NOT EXISTS (
+               SELECT 1
+               FROM public.cwi_submission_report_files AS uploaded_report
+               WHERE uploaded_report.submission_id = s.id
+             )`,
+      )
     }
 
     if (filters.search) {

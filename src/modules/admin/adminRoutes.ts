@@ -211,6 +211,7 @@ export function createAdminRouter(
       const data = await repository.listSubmissionsPage({
         ...cursor,
         limit: parseLimit(req.query.limit),
+        reportPdfUploaded: parseReportPdfUploaded(req.query.reportPdfUploaded),
         roundtableRegistered: parseRoundtable(req.query.roundtable),
         search: parseSearch(req.query.search),
         status: parseStatus(req.query.status),
@@ -226,6 +227,7 @@ export function createAdminRouter(
       const data = await repository.listSubmissions({
         ...parsePaginationCursor(req.query.cursor, req.query.before, req.query.beforeId, config.adminCursorSecret),
         limit: parseLimit(req.query.limit),
+        reportPdfUploaded: parseReportPdfUploaded(req.query.reportPdfUploaded),
         roundtableRegistered: parseRoundtable(req.query.roundtable),
         search: parseSearch(req.query.search),
         status: parseStatus(req.query.status),
