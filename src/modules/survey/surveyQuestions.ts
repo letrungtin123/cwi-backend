@@ -47,7 +47,7 @@ export const SURVEY_QUESTIONS = [
     part: 1,
     type: 'likert',
     question:
-      'Tôi tin Hệ cộng lực (bao gồm con người, AI, tự động hóa hệ sinh thái) hiện tại sẽ tạo lợi thế cạnh tranh trong 3 năm tới.',
+      'Tôi tin Hệ cộng lực (bao gồm con người, AI, tự động hóa, hệ sinh thái) hiện tại sẽ tạo lợi thế cạnh tranh trong 3 năm tới.',
   },
   {
     idx: 7,
