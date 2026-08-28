@@ -40,7 +40,7 @@ const aiQuestionTextByIdx = new Map<number, string>([
   [3, 'Tôi tin tưởng vào năng lực của đội ngũ quản lý.'],
   [4, 'Đội ngũ quản lý hiện tại đủ sức hỗ trợ kế hoạch tăng trưởng mà CEO mong đợi.'],
   [5, 'Chúng tôi giữ chân được nhân tài quan trọng.'],
-  [6, 'Tôi tin Workforce (hệ năng lực gồm nhân viên-robot-AI-đối tác) hiện tại sẽ tạo lợi thế cạnh tranh trong 3 năm tới.'],
+  [6, 'Tôi tin Hệ cộng lực (bao gồm con người, AI, tự động hóa hệ sinh thái)'],
   [7, 'Đội ngũ quản lý của chúng tôi có thể chuyển các ưu tiên chiến lược thành hành động nhất quán trong đơn vị mình phụ trách.'],
   [8, 'Các quản lý có đủ quyền và năng lực để tự ra quyết định trong phạm vi trách nhiệm mà không phải phụ thuộc quá nhiều vào cấp trên.'],
   [9, 'Các quản lý chủ động phát triển đội ngũ kế cận thay vì chỉ tập trung hoàn thành mục tiêu ngắn hạn.'],

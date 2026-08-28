@@ -46,8 +46,7 @@ export const SURVEY_QUESTIONS = [
     idx: 6,
     part: 1,
     type: 'likert',
-    question:
-      'Tôi tin Hệ năng lực (bao gồm  con người, AI, công nghệ, dữ liệu, đối tác) hiện tại sẽ tạo lợi thế cạnh tranh trong 3 năm tới.',
+    question: 'Tôi tin Hệ cộng lực (bao gồm con người, AI, tự động hóa hệ sinh thái)',
   },
   {
     idx: 7,
