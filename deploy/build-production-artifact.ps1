@@ -3,6 +3,7 @@ param(
   [string]$DashboardPath = '',
   [string]$OutputDirectory = '',
   [string]$ReleaseId = '',
+  [string]$FrontendApiBaseUrl = '/api',
   [switch]$SkipInstall
 )
 
@@ -66,6 +67,7 @@ Assert-CleanRepository $backendPath 'cwi-backend repository'
 
 if (-not $ReleaseId) { $ReleaseId = [DateTime]::UtcNow.ToString('yyyyMMddHHmmss') }
 if ($ReleaseId -notmatch '^[0-9A-Za-z._-]+$') { throw 'ReleaseId contains unsupported characters.' }
+if ($FrontendApiBaseUrl -notmatch '^(\/[^\s]*)$|^https?:\/\/[^\s]+$') { throw 'FrontendApiBaseUrl must be a relative /api path or an http(s) URL.' }
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $backendPath '.artifacts' }
 $OutputDirectory = (New-Item -ItemType Directory -Force -Path $OutputDirectory).FullName
 
@@ -75,9 +77,18 @@ if (-not $SkipInstall) {
   Invoke-Npm $backendPath @('ci', '--no-audit', '--no-fund')
 }
 
-Invoke-Npm $Source4Path @('run', 'build')
-Invoke-Npm $DashboardPath @('run', 'build')
-Invoke-Npm $backendPath @('run', 'build')
+$previousSource4ApiUrl = [Environment]::GetEnvironmentVariable('VITE_CWI_API_BASE_URL', 'Process')
+$previousDashboardApiUrl = [Environment]::GetEnvironmentVariable('VITE_API_BASE_URL', 'Process')
+$env:VITE_CWI_API_BASE_URL = $FrontendApiBaseUrl
+$env:VITE_API_BASE_URL = $FrontendApiBaseUrl
+try {
+  Invoke-Npm $Source4Path @('run', 'build')
+  Invoke-Npm $DashboardPath @('run', 'build')
+  Invoke-Npm $backendPath @('run', 'build')
+} finally {
+  if ($null -eq $previousSource4ApiUrl) { Remove-Item Env:VITE_CWI_API_BASE_URL -ErrorAction SilentlyContinue } else { $env:VITE_CWI_API_BASE_URL = $previousSource4ApiUrl }
+  if ($null -eq $previousDashboardApiUrl) { Remove-Item Env:VITE_API_BASE_URL -ErrorAction SilentlyContinue } else { $env:VITE_API_BASE_URL = $previousDashboardApiUrl }
+}
 
 $stagePath = Join-Path $OutputDirectory ".stage-$ReleaseId"
 $artifactPath = Join-Path $OutputDirectory "cwi-release-$ReleaseId.tar.gz"

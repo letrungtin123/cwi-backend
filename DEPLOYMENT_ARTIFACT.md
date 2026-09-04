@@ -16,6 +16,8 @@ Set-Location D:\CWI\cwi-backend
 
 Lệnh trên build theo lockfile, đóng gói commit cụ thể của cả ba repository, gửi artifact qua SSH và chạy kiểm tra trước khi PM2 reload. Không chạy `git pull` trên production.
 
+Frontend production mặc định được build với API cùng origin là `/api`, vì public router phục vụ landing, dashboard và proxy API trên cùng domain. `.env` localhost của máy phát triển không bị đóng gói vào release. Chỉ truyền `-FrontendApiBaseUrl` khi frontend thực sự được phục vụ ở một host API khác đã được kiểm soát.
+
 Nếu cần chỉ tạo gói để kiểm tra:
 
 ```powershell

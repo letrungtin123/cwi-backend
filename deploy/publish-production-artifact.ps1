@@ -5,6 +5,7 @@ param(
   [string]$SshKeyPath = '',
   [string]$Source4Path = '',
   [string]$DashboardPath = '',
+  [string]$FrontendApiBaseUrl = '/api',
   [switch]$SkipInstall,
   [switch]$PruneLegacySource
 )
@@ -25,6 +26,7 @@ $builder = Join-Path $PSScriptRoot 'build-production-artifact.ps1'
 $buildArgs = @('-File', $builder)
 if ($Source4Path) { $buildArgs += @('-Source4Path', $Source4Path) }
 if ($DashboardPath) { $buildArgs += @('-DashboardPath', $DashboardPath) }
+if ($FrontendApiBaseUrl) { $buildArgs += @('-FrontendApiBaseUrl', $FrontendApiBaseUrl) }
 if ($SkipInstall) { $buildArgs += '-SkipInstall' }
 $artifactPath = (& pwsh @buildArgs | Select-Object -Last 1).Trim()
 if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) { throw "Artifact was not created: $artifactPath" }

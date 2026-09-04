@@ -20,6 +20,8 @@ Set-Location D:\CWI\cwi-backend
 
 Script dùng lockfile để cài dependency, chạy build cho cả ba repository, tạo manifest commit và checksum SHA-256, sau đó gửi một artifact qua SSH. Máy chủ không chạy `git pull` và không build raw source.
 
+Builder luôn ghi đè URL API frontend thành `/api` trong lúc build production để không đưa `localhost` từ `.env phát triển` vào bundle. Chỉ dùng `-FrontendApiBaseUrl` cho mô hình tách host đã được kiểm tra CORS và HTTPS.
+
 Chỉ tạo gói để kiểm tra local:
 
 ```powershell
