@@ -39,7 +39,9 @@ if ($SshKeyPath) {
   $sshOptions += @('-i', $key)
 }
 
-$remoteIncoming = "~/cwi-platform/incoming/$artifactName"
+$remoteHome = (& ssh @sshOptions $remoteTarget 'printf %s "$HOME"').Trim()
+if (-not $remoteHome -or $remoteHome -notmatch '^/[A-Za-z0-9._/-]+$') { throw "Cannot resolve a safe remote home directory: $remoteHome" }
+$remoteIncoming = "$remoteHome/cwi-platform/incoming/$artifactName"
 Invoke-Checked 'ssh' ($sshOptions + @($remoteTarget, 'mkdir -p ~/cwi-platform/incoming'))
 Invoke-Checked 'scp' ($sshOptions + @($artifactPath, "${remoteTarget}:$remoteIncoming"))
 
