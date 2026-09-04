@@ -52,7 +52,7 @@ $installer = Join-Path $backendPath 'deploy/install-production-artifact.sh'
 $installArgs = @('--artifact', $remoteIncoming)
 if ($PruneLegacySource) { $installArgs += '--prune-legacy-source' }
 $installCommand = 'bash -s -- ' + (($installArgs | ForEach-Object { "'$_'" }) -join ' ')
-$installerContent = Get-Content -LiteralPath $installer -Raw
+$installerContent = (Get-Content -LiteralPath $installer -Raw) -replace "`r`n", "`n" -replace "`r", "`n"
 $installerContent | & ssh @sshOptions $remoteTarget $installCommand
 if ($LASTEXITCODE -ne 0) { throw "Remote artifact installation failed with exit code $LASTEXITCODE" }
 
