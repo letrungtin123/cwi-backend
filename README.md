@@ -89,7 +89,9 @@ The backend stores canonical question text from `src/modules/survey/surveyQuesti
 
 ## Production Deployment
 
-`deploy/update-production.sh` fetches `origin/main`, creates isolated Git worktrees, installs/builds all three applications, runs liveness/readiness and static smoke checks, then replaces the PM2 processes with the staged release. It keeps the previous release available for rollback and never runs database migrations during a code deploy.
+Production chạy bằng artifact đã build và kiểm tra từ máy local hoặc CI; máy chủ không cần giữ Git repository hay raw source của ba ứng dụng. Xem `DEPLOYMENT_ARTIFACT.md` và `deploy/README.md` để tạo, gửi, kiểm tra, rollback và dọn release.
+
+`deploy/build-production-artifact.ps1` chỉ đóng gói `dist`, runtime launcher, production dependencies metadata và checksum. `deploy/install-production-artifact.sh` cài release mới qua staging health check trước khi thay PM2. Secrets nằm ngoài release qua `CWI_ENV_FILE`; quy trình không chạy SQL migration và không tác động dữ liệu Supabase.
 
 ## V3 Report Pipeline
 

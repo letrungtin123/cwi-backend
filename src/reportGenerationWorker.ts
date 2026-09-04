@@ -34,6 +34,8 @@ if (!env.reportServiceEnabled) {
     client: new ReportServiceClient({ baseUrl: env.reportServiceBaseUrl, timeoutMs: env.reportServiceTimeoutMs }),
     config: {
       autoEmailEnabled: env.reportAutoEmailEnabled,
+      debugDumpHtml: env.reportDebugDumpHtml,
+      debugHtmlDir: env.reportDebugHtmlDir,
       enabled: true,
       generatedPdfFileName: env.reportGeneratedPdfFileName,
       generatedStorageBucket: env.reportStorageBucket,

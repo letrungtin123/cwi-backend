@@ -6,10 +6,14 @@ const backendRoot = path.join(platformRoot, 'cwi-backend')
 const publicRouter = path.join(backendRoot, 'deploy', 'cwi-public-router.mjs')
 const nodeEnv = process.env.CWI_NODE_ENV || 'development'
 const publicOrigin = process.env.CWI_PUBLIC_ORIGIN || 'https://ceo-workforce-index.com'
+const envFile = process.env.CWI_ENV_FILE || path.join(platformRoot, 'config', 'cwi-backend.env')
 const productionBackendEnv = {
   AUTH_COOKIE_SAME_SITE: 'lax',
   AUTH_COOKIE_SECURE: 'true',
   CORS_ALLOWED_ORIGINS: process.env.CWI_CORS_ALLOWED_ORIGINS || publicOrigin,
+  CWI_ENV_FILE: envFile,
+  CWI_PLATFORM_ROOT: platformRoot,
+  DOTENV_CONFIG_PATH: envFile,
 }
 
 module.exports = {

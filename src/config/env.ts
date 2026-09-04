@@ -1,5 +1,7 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
 import { z } from 'zod'
+
+dotenv.config({ path: process.env.CWI_ENV_FILE || '.env' })
 
 const booleanSchema = z.preprocess((value) => {
   if (value === undefined) return undefined
@@ -51,6 +53,8 @@ const envSchema = z
     REPORT_SERVICE_BASE_URL: z.string().url().default('http://127.0.0.1:8000'),
     REPORT_STORAGE_BUCKET: bucketNameSchema.default('cwi-report-assets'),
     REPORT_STORAGE_UPLOAD_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300000).default(60000),
+    REPORT_DEBUG_DUMP_HTML: booleanSchema.default(false),
+    REPORT_DEBUG_HTML_DIR: z.string().trim().min(1).default('./storage/debug-report-html'),
     REPORT_PUBLIC_TOKEN_SECRET: z.string().trim().optional(),
     REPORT_PUBLIC_TOKEN_TTL_SECONDS: z.coerce.number().int().min(300).max(604800).default(86400),
     REPORT_SERVICE_ENABLED: booleanSchema.default(false),
@@ -137,6 +141,9 @@ const envSchema = z
       }
     }
     if (value.REPORT_SERVICE_ENABLED) {
+      if (value.NODE_ENV === 'production' && value.REPORT_DEBUG_DUMP_HTML) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'REPORT_DEBUG_DUMP_HTML cannot be enabled in production', path: ['REPORT_DEBUG_DUMP_HTML'] })
+      }
       if (value.NODE_ENV === 'production' && (!value.REPORT_PUBLIC_TOKEN_SECRET || value.REPORT_PUBLIC_TOKEN_SECRET.length < 32)) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'REPORT_PUBLIC_TOKEN_SECRET must be at least 32 characters in production when report generation is enabled', path: ['REPORT_PUBLIC_TOKEN_SECRET'] })
       }
@@ -234,6 +241,8 @@ export const env = {
   reportStorageBucket: parsed.data.REPORT_STORAGE_BUCKET,
   reportStorageDir: parsed.data.REPORT_STORAGE_DIR,
   reportStorageUploadTimeoutMs: parsed.data.REPORT_STORAGE_UPLOAD_TIMEOUT_MS,
+  reportDebugDumpHtml: parsed.data.REPORT_DEBUG_DUMP_HTML,
+  reportDebugHtmlDir: parsed.data.REPORT_DEBUG_HTML_DIR,
   reportPublicTokenSecret: parsed.data.REPORT_PUBLIC_TOKEN_SECRET ?? parsed.data.IP_HASH_SECRET ?? 'development-only-report-token-secret',
   reportPublicTokenTtlSeconds: parsed.data.REPORT_PUBLIC_TOKEN_TTL_SECONDS,
   reportWorkerInitialPollDelayMs: parsed.data.REPORT_WORKER_INITIAL_POLL_DELAY_MS,

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+if [[ "${CWI_ALLOW_LEGACY_SOURCE_DEPLOY:-false}" != 'true' ]]; then
+  echo 'Source checkout deployment is disabled. Build an artifact locally and use deploy/install-production-artifact.sh.' >&2
+  exit 1
+fi
+
 export PATH="${HOME}/.local/bin:${HOME}/.local/node/bin:${PATH}"
 
 platform_root="${CWI_PLATFORM_ROOT:-${HOME}/cwi-platform/repos}"

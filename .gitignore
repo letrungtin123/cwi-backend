@@ -7,5 +7,6 @@ coverage
 *.log
 npm-debug.log*
 storage/
+.artifacts/
 
 deploy/rabbitmq/.env

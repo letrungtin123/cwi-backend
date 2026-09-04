@@ -27,6 +27,8 @@ function createWorker(client: ReportServiceClient, repository: PgReportRepositor
     client,
     config: {
       autoEmailEnabled: false,
+      debugDumpHtml: false,
+      debugHtmlDir: './storage/debug-report-html',
       enabled: true,
       generatedPdfFileName: 'bao-cao.pdf',
       generatedStorageBucket: 'reports',

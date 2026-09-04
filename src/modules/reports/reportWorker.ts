@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { mkdir, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import type { Logger } from 'pino'
 import { buildReportObjectPaths, ReportAssetStorageError, type ReportAssetStorage } from './reportAssetStorage.js'
 import type { ClaimedReportJob, PgReportRepository } from './reportRepository.js'
@@ -9,6 +11,8 @@ export type ReportWorkerConfig = {
   autoEmailEnabled: boolean
   generatedPdfFileName: string
   generatedStorageBucket: string
+  debugDumpHtml: boolean
+  debugHtmlDir: string
   enabled: boolean
   initialPollDelayMs: number
   lockMs: number
@@ -196,6 +200,16 @@ export class ReportWorker {
 
     try {
       const report = await this.dependencies.client.getReport(reportId)
+      if (this.dependencies.config.debugDumpHtml) {
+        try {
+          const debugPath = path.resolve(this.dependencies.config.debugHtmlDir, `${job.id}-${report.report_id}.html`)
+          await mkdir(path.dirname(debugPath), { recursive: true })
+          await writeFile(debugPath, report.report.html, 'utf8')
+          this.dependencies.logger.info({ bytes: Buffer.byteLength(report.report.html, 'utf8'), htmlPath: debugPath, jobId: job.id }, 'Local debug HTML saved')
+        } catch (error) {
+          this.dependencies.logger.warn({ error, jobId: job.id }, 'Local debug HTML could not be saved')
+        }
+      }
       storedHtml = await this.dependencies.pdfRenderer.storeHtml(job.submissionId, report.report_id, report.report.html)
       const objectPaths = buildReportObjectPaths({ reportJobId: job.id, submissionId: job.submissionId, timestamp: job.createdAt })
 
