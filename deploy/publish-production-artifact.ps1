@@ -28,7 +28,10 @@ if ($Source4Path) { $buildArgs += @('-Source4Path', $Source4Path) }
 if ($DashboardPath) { $buildArgs += @('-DashboardPath', $DashboardPath) }
 if ($FrontendApiBaseUrl) { $buildArgs += @('-FrontendApiBaseUrl', $FrontendApiBaseUrl) }
 if ($SkipInstall) { $buildArgs += '-SkipInstall' }
-$artifactPath = (& pwsh @buildArgs | Select-Object -Last 1).Trim()
+$buildOutput = @(& pwsh @buildArgs)
+$builderExitCode = $LASTEXITCODE
+if ($builderExitCode -ne 0) { throw "Local production artifact build failed with exit code $builderExitCode" }
+$artifactPath = (($buildOutput | Select-Object -Last 1) ?? '').ToString().Trim()
 if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) { throw "Artifact was not created: $artifactPath" }
 
 $artifactName = Split-Path -Leaf $artifactPath
