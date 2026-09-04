@@ -53,6 +53,26 @@ function Assert-CleanRepository([string]$RepositoryPath, [string]$Label) {
   }
 }
 
+function Assert-ProductionRepository([string]$RepositoryPath, [string]$Label) {
+  Assert-CleanRepository $RepositoryPath $Label
+  Push-Location $RepositoryPath
+  try {
+    $branch = (& git branch --show-current).Trim()
+    if ($LASTEXITCODE -ne 0 -or $branch -ne 'main') {
+      throw "$Label must be checked out on main before creating a production artifact."
+    }
+    & git fetch origin main --quiet
+    if ($LASTEXITCODE -ne 0) { throw "Cannot refresh origin/main for $Label" }
+    $localSha = (& git rev-parse HEAD).Trim()
+    $remoteSha = (& git rev-parse origin/main).Trim()
+    if ($LASTEXITCODE -ne 0 -or $localSha -ne $remoteSha) {
+      throw "$Label main is not synchronized with origin/main. Push or pull before creating a production artifact."
+    }
+  } finally {
+    Pop-Location
+  }
+}
+
 $backendPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $workspacePath = (Resolve-Path -LiteralPath (Join-Path $backendPath '..')).Path
 if (-not $Source4Path) { $Source4Path = Join-Path $workspacePath 'source4' }
@@ -61,9 +81,9 @@ $Source4Path = Resolve-RequiredPath $Source4Path 'source4 repository'
 $DashboardPath = Resolve-RequiredPath $DashboardPath 'cwi-dashboard repository'
 $backendPath = Resolve-RequiredPath $backendPath 'cwi-backend repository'
 
-Assert-CleanRepository $Source4Path 'source4 repository'
-Assert-CleanRepository $DashboardPath 'cwi-dashboard repository'
-Assert-CleanRepository $backendPath 'cwi-backend repository'
+Assert-ProductionRepository $Source4Path 'source4 repository'
+Assert-ProductionRepository $DashboardPath 'cwi-dashboard repository'
+Assert-ProductionRepository $backendPath 'cwi-backend repository'
 
 if (-not $ReleaseId) { $ReleaseId = [DateTime]::UtcNow.ToString('yyyyMMddHHmmss') }
 if ($ReleaseId -notmatch '^[0-9A-Za-z._-]+$') { throw 'ReleaseId contains unsupported characters.' }
