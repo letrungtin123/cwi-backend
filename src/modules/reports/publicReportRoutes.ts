@@ -69,7 +69,9 @@ export function createPublicReportRouter(
       if (!reportJob) throw new HttpError(409, 'report_html_not_ready', 'Báo cáo chưa sẵn sàng.')
 
       const asset = await assetStorage.download(reportJob.storagePath)
-      res.setHeader('Cache-Control', 'private, no-store')
+      // Keep the upstream HTML byte-for-byte intact. Cloudflare Email Address
+      // Obfuscation may rewrite text/html responses unless no-transform is set.
+      res.setHeader('Cache-Control', 'private, no-store, no-transform')
       res.setHeader('Content-Disposition', 'inline; filename="bao-cao-cwi.html"')
       res.setHeader('Content-Security-Policy', "default-src 'none'; base-uri 'none'; connect-src 'none'; font-src data:; form-action 'none'; frame-ancestors 'none'; img-src data: blob:; object-src 'none'; script-src 'none'; style-src 'unsafe-inline'")
       res.setHeader('Content-Type', 'text/html; charset=utf-8')
