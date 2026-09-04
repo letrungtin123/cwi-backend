@@ -13,6 +13,10 @@ type FileRow = {
   locked_at: Date | null
   sent_at?: Date | null
   last_error_message?: string | null
+  generated_storage_path: string | null
+  generated_file_name: string | null
+  generated_uploaded_at: Date | null
+  email_original_file_name: string | null
 }
 
 type CampaignRow = {
@@ -40,13 +44,15 @@ function count(value: string | number) {
 }
 
 function mapFile(row: FileRow | null): ReportDeliveryFile {
-  if (!row || !row.storage_path || !row.uploaded_at) return { available: false, fileName: null, fileSize: null, uploadedAt: null, lockedAt: null, downloadUrl: null }
+  const storagePath = row?.storage_path ?? row?.generated_storage_path
+  const uploadedAt = row?.uploaded_at ?? row?.generated_uploaded_at
+  if (!row || !storagePath || !uploadedAt) return { available: false, fileName: null, fileSize: null, uploadedAt: null, lockedAt: null, downloadUrl: null }
   return {
     available: true,
-    fileName: row.original_file_name ?? "bao-cao-ceo-workforce-index.pdf",
-    fileSize: row.file_size === null ? null : count(row.file_size),
+    fileName: row.original_file_name ?? row.email_original_file_name ?? row.generated_file_name ?? 'Bao-cao-CEO-Workforce-Index.pdf',
+    fileSize: row.storage_path ? row.file_size === null ? null : count(row.file_size) : null,
     lockedAt: row.locked_at?.toISOString() ?? null,
-    uploadedAt: row.uploaded_at.toISOString(),
+    uploadedAt: uploadedAt.toISOString(),
     downloadUrl: null,
   }
 }
@@ -83,19 +89,24 @@ export class ReportDeliveryRepositoryError extends Error {
   }
 }
 
-const fileSelect = 'submission_id, storage_bucket, storage_path, original_file_name, file_size, sha256, uploaded_at, locked_at'
+const fileSelect = 'submission_id, storage_bucket, storage_path, original_file_name, file_size, sha256, uploaded_at, locked_at, NULL::text AS generated_storage_path, NULL::text AS generated_file_name, NULL::timestamptz AS generated_uploaded_at, NULL::text AS email_original_file_name'
 
 export class PgReportDeliveryRepository {
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly generatedStorageBucket = 'cwi-report-assets',
+  ) {}
 
   async getStatus(submissionId: string): Promise<ReportDeliveryStatus> {
     const result = await this.pool.query<FileRow & { email_status: string | null }>(
       [
         `SELECT s.id AS submission_id, f.storage_bucket, f.storage_path, f.original_file_name, f.file_size, f.sha256, f.uploaded_at, f.locked_at,`,
-        `       job.status AS email_status, job.sent_at, job.last_error_message`,
+        `       generated.pdf_storage_path AS generated_storage_path, generated.completed_at AS generated_uploaded_at,`,
+        `       job.original_file_name AS email_original_file_name, job.status AS email_status, job.sent_at, job.last_error_message`,
         `FROM public.cwi_survey_submissions s`,
         `LEFT JOIN public.cwi_submission_report_files f ON f.submission_id = s.id`,
-        `LEFT JOIN public.cwi_report_email_jobs job ON job.submission_id = s.id`,
+        `LEFT JOIN LATERAL (SELECT pdf_storage_path, completed_at FROM public.cwi_report_jobs WHERE submission_id = s.id AND status = 'completed' AND pdf_storage_path IS NOT NULL ORDER BY completed_at DESC NULLS LAST, id DESC LIMIT 1) generated ON true`,
+        `LEFT JOIN LATERAL (SELECT status, sent_at, last_error_message, original_file_name FROM public.cwi_report_email_jobs WHERE submission_id = s.id ORDER BY updated_at DESC, id DESC LIMIT 1) job ON true`,
         `WHERE s.id = $1 LIMIT 1`,
       ].join('\n'),
       [submissionId],
@@ -110,10 +121,12 @@ export class PgReportDeliveryRepository {
     const result = await this.pool.query<FileRow & { email_status: string | null }>(
       [
         `SELECT s.id AS submission_id, f.storage_bucket, f.storage_path, f.original_file_name, f.file_size, f.sha256, f.uploaded_at, f.locked_at,`,
-        `       job.status AS email_status, job.sent_at, job.last_error_message`,
+        `       generated.pdf_storage_path AS generated_storage_path, generated.completed_at AS generated_uploaded_at,`,
+        `       job.original_file_name AS email_original_file_name, job.status AS email_status, job.sent_at, job.last_error_message`,
         `FROM public.cwi_survey_submissions s`,
         `LEFT JOIN public.cwi_submission_report_files f ON f.submission_id = s.id`,
-        `LEFT JOIN public.cwi_report_email_jobs job ON job.submission_id = s.id`,
+        `LEFT JOIN LATERAL (SELECT pdf_storage_path, completed_at FROM public.cwi_report_jobs WHERE submission_id = s.id AND status = 'completed' AND pdf_storage_path IS NOT NULL ORDER BY completed_at DESC NULLS LAST, id DESC LIMIT 1) generated ON true`,
+        `LEFT JOIN LATERAL (SELECT status, sent_at, last_error_message, original_file_name FROM public.cwi_report_email_jobs WHERE submission_id = s.id ORDER BY updated_at DESC, id DESC LIMIT 1) job ON true`,
         `WHERE s.id = ANY($1::uuid[]) ORDER BY s.submitted_at DESC, s.id DESC`,
       ].join('\n'),
       [submissionIds],
@@ -128,6 +141,29 @@ export class PgReportDeliveryRepository {
 
   async getFile(submissionId: string) {
     return mapFile(await this.getFileRecord(submissionId))
+  }
+
+  async getDownloadRecord(submissionId: string) {
+    const result = await this.pool.query<{
+      storage_bucket: string | null
+      storage_path: string | null
+      original_file_name: string | null
+    }>(
+      [
+        `SELECT COALESCE(manual.storage_bucket, $2) AS storage_bucket,`,
+        `       COALESCE(manual.storage_path, generated.pdf_storage_path) AS storage_path,`,
+        `       COALESCE(manual.original_file_name, email.original_file_name, 'Bao-cao-CEO-Workforce-Index.pdf') AS original_file_name`,
+        `FROM public.cwi_survey_submissions submission`,
+        `LEFT JOIN public.cwi_submission_report_files manual ON manual.submission_id = submission.id`,
+        `LEFT JOIN LATERAL (SELECT pdf_storage_path FROM public.cwi_report_jobs WHERE submission_id = submission.id AND status = 'completed' AND pdf_storage_path IS NOT NULL ORDER BY completed_at DESC NULLS LAST, id DESC LIMIT 1) generated ON true`,
+        `LEFT JOIN LATERAL (SELECT original_file_name FROM public.cwi_report_email_jobs WHERE submission_id = submission.id ORDER BY updated_at DESC, id DESC LIMIT 1) email ON true`,
+        `WHERE submission.id = $1 LIMIT 1`,
+      ].join('\n'),
+      [submissionId, this.generatedStorageBucket],
+    )
+    const row = result.rows[0]
+    if (!row || !row.storage_path || !row.storage_bucket) return null
+    return { originalFileName: row.original_file_name, storageBucket: row.storage_bucket, storagePath: row.storage_path }
   }
 
   async saveFile(input: { fileName: string; fileSize: number; sha256: string; storageBucket: string; storagePath: string; submissionId: string; uploadedBy: string }) {
@@ -151,13 +187,13 @@ export class PgReportDeliveryRepository {
       await client.query(
         [
           `UPDATE public.cwi_report_email_jobs`,
-          `SET storage_bucket = $2, storage_path = $3, file_sha256 = $4, status = CASE WHEN status IN ('failed', 'unknown') THEN 'queued' ELSE status END, next_attempt_at = now(), published_at = NULL, publish_locked_at = NULL, publish_locked_by = NULL, lease_token = NULL, lease_expires_at = NULL, attempt_started_at = NULL, delivery_unknown_at = NULL, last_error_code = NULL, last_error_message = NULL, updated_at = now()`,
+          `SET storage_bucket = $2, storage_path = $3, original_file_name = $5, file_sha256 = $4, status = CASE WHEN status IN ('failed', 'unknown') THEN 'queued' ELSE status END, next_attempt_at = now(), published_at = NULL, publish_locked_at = NULL, publish_locked_by = NULL, lease_token = NULL, lease_expires_at = NULL, attempt_started_at = NULL, delivery_unknown_at = NULL, last_error_code = NULL, last_error_message = NULL, updated_at = now()`,
           `WHERE submission_id = $1 AND status NOT IN ('sending', 'sent')`,
         ].join('\n'),
-        [input.submissionId, input.storageBucket, input.storagePath, input.sha256],
+        [input.submissionId, input.storageBucket, input.storagePath, input.sha256, input.fileName],
       )
       await client.query('COMMIT')
-      return { file: await this.getFile(input.submissionId), previousPath }
+      return { previousPath }
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined)
       if (error instanceof ReportDeliveryRepositoryError) throw error
@@ -343,6 +379,17 @@ export class PgReportDeliveryRepository {
     return result.rows.map((row) => row.id)
   }
 
+  async claimUnpublishedAutomatic(limit: number, workerId: string, lockMs: number) {
+    const result = await this.pool.query<{ id: string }>(
+      [
+        `WITH candidates AS (SELECT id FROM public.cwi_report_email_jobs WHERE campaign_id IS NULL AND status = 'queued' AND next_attempt_at <= now() AND (published_at IS NULL OR published_at < now() - ($2::bigint * interval '1 millisecond')) AND (publish_locked_at IS NULL OR publish_locked_at < now() - ($2::bigint * interval '1 millisecond')) ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED)`,
+        `UPDATE public.cwi_report_email_jobs j SET publish_locked_at = now(), publish_locked_by = $3 FROM candidates WHERE j.id = candidates.id RETURNING j.id`,
+      ].join('\n'),
+      [limit, lockMs, workerId],
+    )
+    return result.rows.map((row) => row.id)
+  }
+
   async markPublished(ids: string[], workerId: string) {
     if (!ids.length) return
     await this.pool.query(`UPDATE public.cwi_report_email_jobs SET published_at = now(), publish_locked_at = NULL, publish_locked_by = NULL, updated_at = now() WHERE id = ANY($1::uuid[]) AND publish_locked_by = $2`, [ids, workerId])
@@ -355,20 +402,20 @@ export class PgReportDeliveryRepository {
 
   async claimJob(id: string, workerId: string, lockMs: number): Promise<ClaimedEmailJob | null> {
     const leaseToken = randomUUID()
-    const result = await this.pool.query<{ id: string; campaign_id: string; submission_id: string; recipient_email: string; recipient_name: string; storage_bucket: string; storage_path: string; file_sha256: string; attempt_count: number; original_file_name: string | null }>(
+    const result = await this.pool.query<{ id: string; campaign_id: string | null; submission_id: string; recipient_email: string; recipient_name: string; storage_bucket: string; storage_path: string; file_sha256: string; attempt_count: number; original_file_name: string | null; report_job_id: string | null; report_type: string | null }>(
       [
-        `WITH candidate AS (SELECT j.id FROM public.cwi_report_email_jobs j JOIN public.cwi_submission_report_files f ON f.submission_id = j.submission_id AND f.storage_path = j.storage_path WHERE j.id = $1 AND j.status = 'queued' AND j.next_attempt_at <= now() FOR UPDATE OF j),`,
+        `WITH candidate AS (SELECT j.id FROM public.cwi_report_email_jobs j WHERE j.id = $1 AND j.status = 'queued' AND j.next_attempt_at <= now() FOR UPDATE OF j),`,
         `updated AS (`,
         `  UPDATE public.cwi_report_email_jobs j SET status = 'sending', attempt_count = j.attempt_count + 1, locked_at = now(), locked_by = $2, lease_token = $4, lease_expires_at = now() + ($3::bigint * interval '1 millisecond'), attempt_started_at = now(), delivery_unknown_at = NULL, last_error_code = NULL, last_error_message = NULL FROM candidate WHERE j.id = candidate.id`,
-        `  RETURNING j.id, j.campaign_id, j.submission_id, j.recipient_email, j.recipient_name, j.storage_bucket, j.storage_path, j.file_sha256, j.attempt_count`,
+        `  RETURNING j.id, j.campaign_id, j.submission_id, j.report_job_id, j.recipient_email, j.recipient_name, j.storage_bucket, j.storage_path, j.file_sha256, j.attempt_count, j.original_file_name`,
         `)`,
-        `SELECT updated.id, updated.campaign_id, updated.submission_id, updated.recipient_email, updated.recipient_name, updated.storage_bucket, updated.storage_path, updated.file_sha256, updated.attempt_count, f.original_file_name`,
-        `FROM updated JOIN public.cwi_submission_report_files f ON f.submission_id = updated.submission_id AND f.storage_path = updated.storage_path`,
+        `SELECT updated.id, updated.campaign_id, updated.submission_id, updated.recipient_email, updated.recipient_name, updated.storage_bucket, updated.storage_path, updated.file_sha256, updated.attempt_count, COALESCE(updated.original_file_name, manual_file.original_file_name) AS original_file_name, COALESCE(report.report_type, 'personalized') AS report_type`,
+        `FROM updated LEFT JOIN public.cwi_submission_report_files manual_file ON manual_file.submission_id = updated.submission_id LEFT JOIN public.cwi_report_jobs report ON report.id = updated.report_job_id`,
       ].join('\n'),
       [id, workerId, lockMs, leaseToken],
     )
     const row = result.rows[0]
-    return row ? { attemptCount: Number(row.attempt_count), campaignId: row.campaign_id, fileSha256: row.file_sha256, id: row.id, leaseToken, originalFileName: row.original_file_name ?? 'bao-cao-ceo-workforce-index.pdf', recipientEmail: row.recipient_email, recipientName: row.recipient_name, storageBucket: row.storage_bucket, storagePath: row.storage_path, submissionId: row.submission_id } : null
+    return row ? { attemptCount: Number(row.attempt_count), campaignId: row.campaign_id, fileSha256: row.file_sha256, id: row.id, leaseToken, originalFileName: row.original_file_name ?? 'Bao-cao-CEO-Workforce-Index.pdf', recipientEmail: row.recipient_email, recipientName: row.recipient_name, reportType: row.report_type === 'anonymous' ? 'anonymous' : 'personalized', storageBucket: row.storage_bucket, storagePath: row.storage_path, submissionId: row.submission_id } : null
   }
 
   async markSent(jobId: string, leaseToken: string, providerMessageId: string) {
@@ -410,11 +457,23 @@ export class PgReportDeliveryRepository {
   }
 
   async recoverStaleSendingJobs(lockMs: number) {
-    const result = await this.pool.query<{ campaign_id: string }>(
+    const result = await this.pool.query<{ campaign_id: string | null }>(
       `UPDATE public.cwi_report_email_jobs SET status = 'unknown', delivery_unknown_at = now(), locked_at = NULL, locked_by = NULL, lease_token = NULL, lease_expires_at = NULL, attempt_started_at = NULL, last_error_code = 'delivery_ambiguous', last_error_message = 'Không xác định được kết quả SMTP sau khi lease của worker hết hạn.', updated_at = now() WHERE status = 'sending' AND COALESCE(lease_expires_at, locked_at + ($1::bigint * interval '1 millisecond')) < now() RETURNING campaign_id`,
       [lockMs],
     )
-    return [...new Set(result.rows.map((row) => row.campaign_id))]
+    return [...new Set(result.rows.map((row) => row.campaign_id).filter((id): id is string => Boolean(id)))]
+  }
+
+  async retryEmail(submissionId: string) {
+    const result = await this.pool.query<{ id: string; status: string }>(
+      `UPDATE public.cwi_report_email_jobs SET status = 'queued', next_attempt_at = now(), published_at = NULL, publish_locked_at = NULL, publish_locked_by = NULL, locked_at = NULL, locked_by = NULL, lease_token = NULL, lease_expires_at = NULL, attempt_started_at = NULL, last_error_code = NULL, last_error_message = NULL, updated_at = now() WHERE submission_id = $1 AND status = 'failed' RETURNING id, status`,
+      [submissionId],
+    )
+    if (result.rows[0]) return this.getStatus(submissionId)
+
+    const existing = await this.pool.query<{ status: string }>('SELECT status FROM public.cwi_report_email_jobs WHERE submission_id = $1 LIMIT 1', [submissionId])
+    if (!existing.rows[0]) throw new ReportDeliveryRepositoryError('email_job_not_found', 404, 'Lượt gửi này chưa có email cần gửi lại.')
+    throw new ReportDeliveryRepositoryError('email_not_failed', 409, 'Email chỉ có thể gửi lại khi lần gửi trước bị lỗi.')
   }
 
   async refreshCampaign(id: string) {

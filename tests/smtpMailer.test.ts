@@ -70,7 +70,7 @@ describe('report PDF email attachment', () => {
 })
 
 describe('report email template', () => {
-  it('keeps the approved Vietnamese content and embeds the CWI logo', () => {
+  it('keeps the approved personalized Vietnamese content without a logo attachment', () => {
     const { html, text } = buildReportEmail()
 
     expect(text).toContain('Kính gửi quý Anh/Chị,')
@@ -83,5 +83,17 @@ describe('report email template', () => {
     expect(html).not.toContain('<img')
     expect(html).not.toContain('data:image/')
     expect(html).not.toContain('cid:')
+  })
+
+  it('uses the anonymous template for anonymous reports', () => {
+    const { html, subject, text } = buildReportEmail('anonymous')
+
+    expect(subject).toBe('Báo cáo kết quả khảo sát khuyết danh CEO Workforce Index')
+    expect(text).toContain('Kính gửi Quý Anh/Chị,')
+    expect(text).toContain('Theo lựa chọn không chia sẻ thông tin của Quý Anh/Chị khi tham gia khảo sát, Chương trình chỉ ghi nhận và xử lý phần dữ liệu khảo sát ở chế độ khuyết danh.')
+    expect(text).toContain('Tham khảo và lựa chọn các khuyến nghị hành động phù hợp cho mục tiêu tăng trưởng kinh doanh.')
+    expect(text).toContain('T/M Ban Tổ chức')
+    expect(html).toContain('Workforce Plus')
+    expect(html).not.toContain('<img')
   })
 })

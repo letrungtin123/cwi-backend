@@ -1,6 +1,7 @@
 import nodemailer, { type Transporter } from 'nodemailer'
 import { buildReportEmail } from './emailTemplate.js'
 import { normalizeReportFileName } from './reportDeliveryFilename.js'
+import type { ReportEmailType } from './reportDeliveryTypes.js'
 
 export type SmtpAuthMode = 'basic' | 'microsoft365-oauth2'
 
@@ -184,17 +185,17 @@ export class SmtpReportMailer {
     await (await this.getTransport()).verify()
   }
 
-  async send(input: { messageId: string; originalFileName: string; pdfPath: string; recipientEmail: string; recipientName: string }) {
+  async send(input: { messageId: string; originalFileName: string; pdfPath: string; recipientEmail: string; recipientName: string; reportType: ReportEmailType }) {
     const transporter = await this.getTransport()
     try {
-      const { html, text } = buildReportEmail()
+      const { html, subject, text } = buildReportEmail(input.reportType)
       const info = await transporter.sendMail({
         attachments: [buildReportPdfAttachment({ originalFileName: input.originalFileName, pdfPath: input.pdfPath })],
         from: { address: this.config.fromAddress, name: this.config.fromName },
         html,
         messageId: input.messageId,
         replyTo: this.config.replyTo || undefined,
-        subject: 'Báo cáo kết quả khảo sát CEO Workforce Index',
+        subject,
         text,
         to: input.recipientEmail,
       })

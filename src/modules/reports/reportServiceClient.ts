@@ -75,10 +75,31 @@ async function parseResponseBody(response: Response) {
   }
 }
 
+function parseContract<T>(schema: z.ZodType<T>, data: unknown): T {
+  try {
+    return schema.parse(data)
+  } catch {
+    throw new ReportServiceError('Report service response did not match the expected contract.', {
+      code: 'invalid_report_service_response',
+      retryable: false,
+    })
+  }
+}
+
 function errorMessageFromBody(body: unknown) {
   if (!body || typeof body !== 'object') return null
   const detail = 'detail' in body ? body.detail : undefined
   if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (!item || typeof item !== 'object' || !('msg' in item) || typeof item.msg !== 'string') return null
+        return item.msg
+      })
+      .filter((message): message is string => Boolean(message))
+      .slice(0, 3)
+    if (messages.length) return messages.join(' | ')
+  }
   const error = 'error' in body ? body.error : undefined
   if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message
   return null
@@ -93,17 +114,17 @@ export class ReportServiceClient {
       headers: { 'content-type': 'application/json' },
       method: 'POST',
     })
-    return reportAcceptedSchema.parse(data)
+    return parseContract(reportAcceptedSchema, data)
   }
 
   async getJob(jobId: string): Promise<ReportJobStatus> {
-    const data = await this.request(`/v2/report-jobs/${encodeURIComponent(jobId)}`)
-    return reportJobStatusSchema.parse(data)
+    const data = await this.request(`/v3/report-jobs/${encodeURIComponent(jobId)}`)
+    return parseContract(reportJobStatusSchema, data)
   }
 
   async getReport(reportId: string): Promise<CompletedReport> {
-    const data = await this.request(`/v2/reports/${encodeURIComponent(reportId)}`)
-    return completedReportSchema.parse(data)
+    const data = await this.request(`/v3/reports/${encodeURIComponent(reportId)}`)
+    return parseContract(completedReportSchema, data)
   }
 
   private async request(path: string, init: RequestInit = {}) {

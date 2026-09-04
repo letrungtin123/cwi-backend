@@ -36,6 +36,21 @@ export type ReportJobDownload = {
   submissionId: string
 }
 
+export type ReportJobAsset = {
+  storagePath: string
+}
+
+export type PublicReportJob = {
+  createdAt: string
+  emailStatus: string
+  htmlAvailable: boolean
+  id: string
+  pdfAvailable: boolean
+  reportType: string
+  status: ReportJobStatusValue
+  updatedAt: string
+}
+
 type ClaimedReportJobRow = {
   ai_job_id: string | null
   ai_report_id: string | null
@@ -217,35 +232,191 @@ export class PgReportRepository {
     )
   }
 
-  async markCompleted(
-    jobId: string,
-    htmlStoragePath: string,
-    pdfStoragePath: string,
-    pdfSha256: string,
-    report: Parameters<typeof minimalReportPayload>[0],
-  ) {
+  async markHtmlReady(jobId: string, htmlStoragePath: string, report: Parameters<typeof minimalReportPayload>[0]) {
     await this.pool.query(
       `
       UPDATE public.cwi_report_jobs
       SET
-        status = 'completed',
+        status = 'html_ready',
         html_storage_path = $2,
-        pdf_storage_path = $3,
-        pdf_sha256 = $4,
-        response_payload = $5::jsonb,
+        response_payload = $3::jsonb,
         ai_completed_at = COALESCE(ai_completed_at, now()),
-        pdf_generated_at = now(),
-        completed_at = now(),
         next_poll_at = NULL,
         last_error_code = NULL,
         last_error_message = NULL,
-        locked_at = NULL,
-        locked_by = NULL,
         updated_at = now()
       WHERE id = $1
       `,
-      [jobId, htmlStoragePath, pdfStoragePath, pdfSha256, JSON.stringify(minimalReportPayload(report))],
+      [jobId, htmlStoragePath, JSON.stringify(minimalReportPayload(report))],
     )
+  }
+
+  async markCompleted(
+    jobId: string,
+    pdfStoragePath: string,
+    pdfSha256: string,
+    delivery?: {
+      enabled: boolean
+      fileName: string
+      storageBucket: string
+    },
+  ) {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const completed = await client.query<{ submission_id: string }>(
+        `
+        UPDATE public.cwi_report_jobs
+        SET
+          status = 'completed',
+          pdf_storage_path = $2,
+          pdf_sha256 = $3,
+          ai_completed_at = COALESCE(ai_completed_at, now()),
+          pdf_generated_at = now(),
+          completed_at = now(),
+          next_poll_at = NULL,
+          last_error_code = NULL,
+          last_error_message = NULL,
+          locked_at = NULL,
+          locked_by = NULL,
+          updated_at = now()
+        WHERE id = $1
+        RETURNING submission_id
+        `,
+        [jobId, pdfStoragePath, pdfSha256],
+      )
+
+      if (delivery?.enabled && completed.rows[0]) {
+        await client.query(
+          `
+          INSERT INTO public.cwi_report_email_jobs (
+            campaign_id,
+            report_job_id,
+            submission_id,
+            recipient_email,
+            recipient_name,
+            storage_bucket,
+            storage_path,
+            original_file_name,
+            file_sha256,
+            status,
+            next_attempt_at
+          )
+          SELECT
+            NULL,
+            $1,
+            submission.id,
+            submission.email,
+            submission.full_name,
+            $3,
+            $4,
+            $5,
+            $6,
+            'queued',
+            now()
+          FROM public.cwi_survey_submissions AS submission
+          WHERE submission.id = $2
+            AND NOT EXISTS (
+              SELECT 1
+              FROM public.cwi_submission_report_files AS manual_file
+              WHERE manual_file.submission_id = submission.id
+            )
+          ON CONFLICT (submission_id) DO UPDATE
+          SET
+            report_job_id = EXCLUDED.report_job_id,
+            recipient_email = EXCLUDED.recipient_email,
+            recipient_name = EXCLUDED.recipient_name,
+            storage_bucket = EXCLUDED.storage_bucket,
+            storage_path = EXCLUDED.storage_path,
+            original_file_name = EXCLUDED.original_file_name,
+            file_sha256 = EXCLUDED.file_sha256,
+            status = CASE WHEN cwi_report_email_jobs.status = 'failed' THEN 'queued' ELSE cwi_report_email_jobs.status END,
+            next_attempt_at = CASE WHEN cwi_report_email_jobs.status IN ('queued', 'failed') THEN now() ELSE cwi_report_email_jobs.next_attempt_at END,
+            published_at = CASE WHEN cwi_report_email_jobs.status IN ('queued', 'failed') THEN NULL ELSE cwi_report_email_jobs.published_at END,
+            publish_locked_at = CASE WHEN cwi_report_email_jobs.status IN ('queued', 'failed') THEN NULL ELSE cwi_report_email_jobs.publish_locked_at END,
+            publish_locked_by = CASE WHEN cwi_report_email_jobs.status IN ('queued', 'failed') THEN NULL ELSE cwi_report_email_jobs.publish_locked_by END,
+            last_error_code = CASE WHEN cwi_report_email_jobs.status IN ('queued', 'failed') THEN NULL ELSE cwi_report_email_jobs.last_error_code END,
+            last_error_message = CASE WHEN cwi_report_email_jobs.status IN ('queued', 'failed') THEN NULL ELSE cwi_report_email_jobs.last_error_message END,
+            updated_at = now()
+          WHERE cwi_report_email_jobs.campaign_id IS NULL
+            AND cwi_report_email_jobs.status IN ('queued', 'failed')
+          `,
+          [jobId, completed.rows[0].submission_id, delivery.storageBucket, pdfStoragePath, delivery.fileName, pdfSha256],
+        )
+      }
+
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined)
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  async getPublicReportJob(jobId: string): Promise<PublicReportJob | null> {
+    const result = await this.pool.query<{
+      created_at: Date
+      email_status: string | null
+      html_storage_path: string | null
+      id: string
+      pdf_storage_path: string | null
+      report_type: string
+      status: ReportJobStatusValue
+      updated_at: Date
+    }>(
+      `
+      SELECT
+        job.id,
+        job.report_type,
+        job.status,
+        job.html_storage_path,
+        job.pdf_storage_path,
+        job.created_at,
+        job.updated_at,
+        email.status AS email_status
+      FROM public.cwi_report_jobs AS job
+      LEFT JOIN LATERAL (
+        SELECT email_job.status
+        FROM public.cwi_report_email_jobs AS email_job
+        WHERE email_job.report_job_id = job.id
+        ORDER BY email_job.created_at DESC, email_job.id DESC
+        LIMIT 1
+      ) AS email ON true
+      WHERE job.id = $1
+      LIMIT 1
+      `,
+      [jobId],
+    )
+    const row = result.rows[0]
+    if (!row) return null
+
+    return {
+      createdAt: row.created_at.toISOString(),
+      emailStatus: row.email_status ?? 'not_sent',
+      htmlAvailable: Boolean(row.html_storage_path),
+      id: row.id,
+      pdfAvailable: Boolean(row.pdf_storage_path && row.status === 'completed'),
+      reportType: row.report_type,
+      status: row.status,
+      updatedAt: row.updated_at.toISOString(),
+    }
+  }
+
+  async getReportJobAsset(jobId: string, asset: 'html' | 'pdf'): Promise<ReportJobAsset | null> {
+    const column = asset === 'html' ? 'html_storage_path' : 'pdf_storage_path'
+    const result = await this.pool.query<{ storage_path: string | null }>(
+      `
+      SELECT ${column} AS storage_path
+      FROM public.cwi_report_jobs
+      WHERE id = $1
+        AND ${asset === 'pdf' ? "status = 'completed'" : "html_storage_path IS NOT NULL"}
+      LIMIT 1
+      `,
+      [jobId],
+    )
+    const storagePath = result.rows[0]?.storage_path
+    return storagePath ? { storagePath } : null
   }
 
   async markRetry(jobId: string, status: ReportJobStatusValue, attemptCount: number, errorCode: string, errorMessage: string, nextPollAt: Date) {

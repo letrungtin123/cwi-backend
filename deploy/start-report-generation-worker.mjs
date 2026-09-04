@@ -7,4 +7,4 @@ if (isProduction) {
     process.env.CWI_CORS_ALLOWED_ORIGINS || process.env.CWI_PUBLIC_ORIGIN || 'https://ceo-workforce-index.com'
 }
 
-await import('../dist/server.js')
+await import('../dist/reportGenerationWorker.js')

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { HttpError } from '../src/http/errors.js'
 import { buildAnonymousReportPayload } from '../src/modules/reports/anonymousReportPayload.js'
-import { normalizeRoundtableRegistration } from '../src/modules/roundtable/roundtableValidation.js'
+import { normalizeRoundtableEmailCheck, normalizeRoundtableRegistration } from '../src/modules/roundtable/roundtableValidation.js'
 import { buildReportObjectPaths } from '../src/modules/reports/reportAssetStorage.js'
 import { buildReportJobRequest } from '../src/modules/reports/reportPayload.js'
 import { normalizeSurveySubmission } from '../src/modules/survey/submissionValidation.js'
@@ -51,11 +51,8 @@ describe('normalizeSurveySubmission', () => {
     expect(submission.statusNote).toContain('Phần 1')
 
     const reportPayload = buildAnonymousReportPayload(submission)
-    expect(reportPayload.participant).toEqual({
-      full_name: 'Nguyễn Văn An',
-      phone_number: '00000000',
-      position: 'HRM',
-    })
+    expect(reportPayload.participant).toEqual({ position: 'HRM' })
+    expect(reportPayload.delivery_contact).toEqual({ email: 'an@company.com', full_name: 'Nguyễn Văn An' })
     expect(reportPayload.cohort_consent).toBe(false)
     expect(reportPayload.answers).toHaveLength(18)
   })
@@ -84,7 +81,7 @@ describe('normalizeSurveySubmission', () => {
         participant,
         privacyConsent: 'yes',
         roundtableRegistration: {
-          email: 'RoundTable@Company.com',
+          email: 'AN@Company.com',
           fullName: 'Nguyễn Văn An',
           registered: true,
         },
@@ -95,7 +92,7 @@ describe('normalizeSurveySubmission', () => {
 
     expect(submission.answers).toHaveLength(24)
     expect(submission.roundtableRegistration).toEqual({
-      email: 'roundtable@company.com',
+      email: 'an@company.com',
       fullName: 'Nguyễn Văn An',
       id: null,
       position: null,
@@ -103,13 +100,35 @@ describe('normalizeSurveySubmission', () => {
     })
     expect(submission.statusNote).toContain('Đồng ý')
 
-    const reportJob = buildReportJobRequest(submission, { participantPhonePlaceholder: '00000000' })
-    expect(reportJob.providerEndpoint).toBe('/v2/reports/personalized')
+    const reportJob = buildReportJobRequest(submission)
+    expect(reportJob.providerEndpoint).toBe('/v3/reports/personalized')
     expect(reportJob.reportType).toBe('personalized')
-    expect(reportJob.requestPayload.answers).toHaveLength(23)
-    expect(reportJob.requestPayload.company?.website).toBe('https://example.com')
+    expect(reportJob.requestPayload.answers).toHaveLength(24)
+    expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 24)?.answer).toBe('https://example.com')
     expect(reportJob.requestPayload.cohort_consent).toBe(true)
-    expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 23)?.answer).toBe('Từ 300 đến dưới 1000 tỉ VND')
+    expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 23)?.answer).toBe('Từ 300 - <1,000 tỷ VND')
+    expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 2)?.question).toContain('của chúng tôi')
+    expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 6)?.question).toContain('Hệ năng lực')
+    expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 14)?.question).toContain('Giám đốc nhân sự')
+  })
+
+  it('rejects a Roundtable email that does not match the participant email', () => {
+    expect(() =>
+      normalizeSurveySubmission(
+        {
+          answers: allAnswers(),
+          participant,
+          privacyConsent: 'yes',
+          roundtableRegistration: {
+            email: 'different@company.com',
+            fullName: 'Nguyễn Văn An',
+            registered: true,
+          },
+          submissionStatus: 'full_private_report',
+        },
+        null,
+      ),
+    ).toThrow(HttpError)
   })
 
   it('rejects part1_only submissions that include Part 2 answers', () => {
@@ -142,6 +161,10 @@ describe('normalizeSurveySubmission', () => {
 })
 
 describe('normalizeRoundtableRegistration', () => {
+  it('normalizes email-only status checks', () => {
+    expect(normalizeRoundtableEmailCheck({ email: '  CEO@Company.com ' })).toEqual({ email: 'ceo@company.com' })
+  })
+
   it('normalizes standalone roundtable registration payloads', () => {
     const registration = normalizeRoundtableRegistration(
       {

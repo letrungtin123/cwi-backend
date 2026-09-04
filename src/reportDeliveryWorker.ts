@@ -54,6 +54,43 @@ async function publishJobs(channel: ConfirmChannel, repository: PgReportDelivery
   }
 }
 
+async function publishAutomaticJobs(channel: ConfirmChannel, repository: PgReportDeliveryRepository) {
+  const publishWorkerId = workerId + '-automatic-publisher'
+  const ids = await repository.claimUnpublishedAutomatic(100, publishWorkerId, env.reportDeliveryLockMs)
+  if (!ids.length) return
+  try {
+    for (const id of ids) channel.publish(exchange, routingSend, Buffer.from(JSON.stringify({ jobId: id })), { contentType: 'application/json', deliveryMode: 2 })
+    await channel.waitForConfirms()
+    await repository.markPublished(ids, publishWorkerId)
+  } catch (error) {
+    await repository.releasePublishLocks(ids, publishWorkerId)
+    throw error
+  }
+}
+
+const requiredDeliveryColumns = [
+  ['cwi_report_email_jobs', 'report_job_id'],
+  ['cwi_report_email_jobs', 'original_file_name'],
+  ['cwi_report_jobs', 'report_type'],
+  ['cwi_submission_report_files', 'original_file_name'],
+] as const
+
+async function verifyDeliverySchema(pool: ReturnType<typeof createDbPool>) {
+  const result = await pool.query<{ table_name: string; column_name: string }>(
+    `SELECT table_name, column_name
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND ((table_name = 'cwi_report_email_jobs' AND column_name IN ('report_job_id', 'original_file_name'))
+         OR (table_name = 'cwi_report_jobs' AND column_name = 'report_type')
+         OR (table_name = 'cwi_submission_report_files' AND column_name = 'original_file_name'))`,
+  )
+  const available = new Set(result.rows.map((row) => `${row.table_name}.${row.column_name}`))
+  const missing = requiredDeliveryColumns.filter(([table, column]) => !available.has(`${table}.${column}`)).map(([table, column]) => `${table}.${column}`)
+  if (missing.length) {
+    throw new Error(`Report delivery schema is incomplete. Missing: ${missing.join(', ')}. Apply the report delivery bridge SQL before starting the worker.`)
+  }
+}
+
 async function dispatchCampaign(channel: ConfirmChannel, repository: PgReportDeliveryRepository, campaignId: string) {
   const claimed = await repository.claimCampaign(campaignId, env.reportDeliveryLockMs)
   if (!claimed) return
@@ -85,30 +122,35 @@ async function consumeDispatch(channel: ConfirmChannel, repository: PgReportDeli
   await dispatchCampaign(channel, repository, campaignId)
 }
 
-async function consumeSend(repository: PgReportDeliveryRepository, storage: ReportAssetStorage, mailer: SmtpReportMailer, message: ConsumeMessage) {
+async function consumeSend(repository: PgReportDeliveryRepository, manualStorage: ReportAssetStorage, generatedStorage: ReportAssetStorage, mailer: SmtpReportMailer, message: ConsumeMessage) {
   const { jobId } = messageJson(message)
   if (!jobId) return
   const job = await repository.claimJob(jobId, workerId, env.reportDeliveryLockMs)
   if (!job) {
-    logger.warn({ jobId }, 'Send message skipped because the email job is no longer claimable')
+    logger.debug({ jobId }, 'Send message skipped because the email job is no longer claimable')
     return
   }
   const directory = await mkdtemp(join(tmpdir(), 'cwi-report-delivery-'))
   const pdfPath = join(directory, 'report.pdf')
   let smtpAccepted = false
   try {
-    if (job.storageBucket !== env.reportDeliveryBucket) throw new Error('PDF storage bucket does not match the configured delivery bucket.')
+    const storage = job.storageBucket === env.reportDeliveryBucket
+      ? manualStorage
+      : job.storageBucket === env.reportStorageBucket
+        ? generatedStorage
+        : null
+    if (!storage) throw new Error('PDF storage bucket is not approved for report delivery.')
     await downloadPdf(storage, job.storagePath, job.fileSha256, pdfPath)
     const fromDomain = env.mailFromAddress.split('@')[1] ?? 'ceo-workforce-index.com'
     const messageId = '<cwi-report-' + job.submissionId + '@' + fromDomain + '>'
-    const providerMessageId = await mailer.send({ messageId, originalFileName: job.originalFileName, pdfPath, recipientEmail: job.recipientEmail, recipientName: job.recipientName })
+    const providerMessageId = await mailer.send({ messageId, originalFileName: job.originalFileName, pdfPath, recipientEmail: job.recipientEmail, recipientName: job.recipientName, reportType: job.reportType })
     smtpAccepted = true
     const markedSent = await repository.markSent(job.id, job.leaseToken, providerMessageId)
     if (!markedSent) {
-      logger.warn({ campaignId: job.campaignId, jobId: job.id }, 'SMTP accepted the report but the worker lease was already lost')
+      logger.debug({ campaignId: job.campaignId, jobId: job.id }, 'SMTP accepted the report but the worker lease was already lost')
       return
     }
-    await repository.refreshCampaign(job.campaignId)
+    if (job.campaignId) await repository.refreshCampaign(job.campaignId)
     logger.info({ campaignId: job.campaignId, jobId: job.id, submissionId: job.submissionId }, 'Report email sent')
     await sleep(Math.ceil(1000 / env.mailSendRatePerSecond))
   } catch (error) {
@@ -118,10 +160,10 @@ async function consumeSend(repository: PgReportDeliveryRepository, storage: Repo
       ? await repository.markUnknown(job.id, job.leaseToken, 'delivery_ambiguous', messageText)
       : await repository.markFailed(job.id, job.leaseToken, job.attemptCount, error instanceof SmtpDeliveryError ? 'smtp_not_sent' : 'delivery_failed', messageText, env.reportDeliveryMaxAttempts)
     if (!marked) {
-      logger.warn({ campaignId: job.campaignId, jobId: job.id }, 'Delivery result was already finalized by another worker')
+      logger.debug({ campaignId: job.campaignId, jobId: job.id }, 'Delivery result was already finalized by another worker')
       return
     }
-    await repository.refreshCampaign(job.campaignId)
+    if (job.campaignId) await repository.refreshCampaign(job.campaignId)
     logger.error({ error, jobId: job.id, attempt: job.attemptCount, deliveryUnknown }, 'Report email failed')
   } finally {
     await rm(directory, { force: true, recursive: true })
@@ -142,9 +184,21 @@ async function run() {
     max: Math.max(2, Math.min(env.dbPoolMax, 5)),
     ssl: env.dbSsl,
   })
-  const repository = new PgReportDeliveryRepository(pool)
-  const storage = new ReportAssetStorage({
+  try {
+    await verifyDeliverySchema(pool)
+  } catch (error) {
+    await pool.end().catch(() => undefined)
+    throw error
+  }
+  const repository = new PgReportDeliveryRepository(pool, env.reportStorageBucket)
+  const manualStorage = new ReportAssetStorage({
     bucket: env.reportDeliveryBucket,
+    serviceRoleKey: env.supabaseServiceRoleKey,
+    storageUrl: env.supabaseStorageUrl,
+    timeoutMs: env.reportStorageUploadTimeoutMs,
+  })
+  const generatedStorage = new ReportAssetStorage({
+    bucket: env.reportStorageBucket,
     serviceRoleKey: env.supabaseServiceRoleKey,
     storageUrl: env.supabaseStorageUrl,
     timeoutMs: env.reportStorageUploadTimeoutMs,
@@ -198,10 +252,16 @@ async function run() {
   })
   await sendConsumer.consume(sendQueue, (message) => {
     if (!message) return
-    void consumeSend(repository, storage, mailer, message)
+    const { jobId } = messageJson(message)
+    if (!jobId) {
+      logger.warn({ messageId: message.properties.messageId ?? null }, 'Invalid send message discarded')
+      sendConsumer.ack(message)
+      return
+    }
+    void consumeSend(repository, manualStorage, generatedStorage, mailer, message)
       .then(() => sendConsumer.ack(message))
       .catch(async (error) => {
-        logger.error({ error }, 'Send message failed; requeueing')
+        logger.error({ error, jobId }, 'Send message failed; requeueing')
         await sleep(env.reportDeliveryRequeueDelayMs)
         sendConsumer.nack(message, false, true)
       })
@@ -218,6 +278,7 @@ async function run() {
         await publishJobs(channel, repository, campaignId)
         await repository.refreshCampaign(campaignId)
       }
+      await publishAutomaticJobs(channel, repository)
       await sleep(env.reportWorkerLoopIntervalMs)
     }
   } finally {

@@ -22,6 +22,7 @@ export class PdfRenderError extends Error {
 
 export type ReportPdfRendererConfig = {
   browserPath: string | null
+  disableSandbox: boolean
   renderTimeoutMs: number
   storageDir: string
 }
@@ -115,24 +116,26 @@ export class ReportPdfRenderer {
     const tempDir = path.join(tmpdir(), `cwi-report-${randomUUID()}`)
     const tempPdfPath = path.join(tempDir, 'report.pdf')
     const finalPdfPath = path.join(storedHtml.reportDir, 'report.pdf')
+    const browserArgs = [
+      '--headless=new',
+      '--disable-background-networking',
+      '--disable-dev-shm-usage',
+      '--disable-extensions',
+      '--disable-gpu',
+      '--no-first-run',
+      '--print-to-pdf-no-header',
+      `--print-to-pdf=${tempPdfPath}`,
+      pathToFileURL(storedHtml.htmlPath).toString(),
+    ]
+
+    if (this.config.disableSandbox) browserArgs.splice(6, 0, '--no-sandbox')
 
     await mkdir(tempDir, { recursive: true })
 
     try {
       await execFileAsync(
         browserPath,
-        [
-          '--headless=new',
-          '--disable-background-networking',
-          '--disable-dev-shm-usage',
-          '--disable-extensions',
-          '--disable-gpu',
-          '--no-first-run',
-          '--no-sandbox',
-          '--print-to-pdf-no-header',
-          `--print-to-pdf=${tempPdfPath}`,
-          pathToFileURL(storedHtml.htmlPath).toString(),
-        ],
+        browserArgs,
         {
           timeout: this.config.renderTimeoutMs,
           windowsHide: true,
@@ -140,8 +143,10 @@ export class ReportPdfRenderer {
       )
 
       const pdf = await readFile(tempPdfPath)
-      if (pdf.length < 1024) {
-        throw new PdfRenderError('Generated PDF is unexpectedly small.', {
+      const hasPdfHeader = pdf.subarray(0, 5).toString('ascii') === '%PDF-'
+      const hasPdfTrailer = pdf.includes(Buffer.from('%%EOF'))
+      if (pdf.length < 1024 || !hasPdfHeader || !hasPdfTrailer) {
+        throw new PdfRenderError('Generated PDF failed structural validation.', {
           code: 'pdf_output_invalid',
           retryable: true,
         })

@@ -18,6 +18,10 @@ export type RuntimeConfig = {
   adminExportEnabled: boolean
   reportDeliveryEnabled: boolean
   reportDeliveryBucket: string
+  reportStorageBucket: string
+  reportAutoEmailEnabled: boolean
+  reportPublicTokenSecret: string
+  reportPublicTokenTtlSeconds: number
   reportUploadMaxBytes: number
   auth: AuthConfig
   corsAllowedOrigins: string[]
@@ -28,5 +32,3 @@ export type RuntimeConfig = {
   requestBodyLimit: string
   trustProxy: boolean
 }
-
-

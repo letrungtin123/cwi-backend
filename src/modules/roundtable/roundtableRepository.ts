@@ -2,6 +2,14 @@ import type pg from 'pg'
 import { withTransaction } from '../../db/transaction.js'
 import { HttpError } from '../../http/errors.js'
 import type { RequestMeta } from '../../http/requestMeta.js'
+import {
+  findLatestSubmissionByEmail,
+  findRoundtableByEmail,
+  linkRoundtableIfUnlinked,
+  lockRoundtableEmail,
+  syncSurveyRoundtableFlags,
+  type RoundtableRow,
+} from './roundtableLinking.js'
 import type { NormalizedRoundtableRegistration } from './roundtableValidation.js'
 
 export type RoundtableRegistrationCreateResult = {
@@ -12,14 +20,8 @@ export type RoundtableRegistrationCreateResult = {
 }
 
 export interface RoundtableRepository {
+  checkRegistration(email: string): Promise<{ registered: boolean }>
   createRegistration(input: NormalizedRoundtableRegistration, meta: RequestMeta): Promise<RoundtableRegistrationCreateResult>
-}
-
-type ExistingRegistrationRow = {
-  id: string
-  payload_hash: string | null
-  registered_at: Date
-  submission_id: string | null
 }
 
 type InsertedRegistrationRow = {
@@ -29,6 +31,7 @@ type InsertedRegistrationRow = {
 }
 
 type SubmissionRow = {
+  email: string
   id: string
 }
 
@@ -36,7 +39,10 @@ function dateToIso(value: Date | string) {
   return value instanceof Date ? value.toISOString() : value
 }
 
-function assertSamePayload(row: ExistingRegistrationRow, input: NormalizedRoundtableRegistration) {
+function assertSamePayload(row: Pick<RoundtableRow, 'email' | 'payload_hash'>, input: NormalizedRoundtableRegistration) {
+  if (row.email.trim().toLowerCase() !== input.email) {
+    throw new HttpError(409, 'roundtable_idempotency_key_conflict', 'Roundtable registration key does not match the registration email.')
+  }
   if (row.payload_hash && row.payload_hash !== input.payloadHash) {
     throw new HttpError(
       409,
@@ -46,82 +52,93 @@ function assertSamePayload(row: ExistingRegistrationRow, input: NormalizedRoundt
   }
 }
 
-async function findLinkedSubmission(client: pg.PoolClient, input: NormalizedRoundtableRegistration) {
-  if (!input.surveySubmissionIdempotencyKey) return null
+async function findSubmissionForInput(client: pg.PoolClient, input: NormalizedRoundtableRegistration) {
+  if (input.surveySubmissionIdempotencyKey) {
+    const result = await client.query<SubmissionRow>(
+      `
+      SELECT id, email
+      FROM public.cwi_survey_submissions
+      WHERE idempotency_key = $1
+      LIMIT 1
+      `,
+      [input.surveySubmissionIdempotencyKey],
+    )
 
-  const result = await client.query<SubmissionRow>(
+    const row = result.rows[0]
+    if (row && row.email.trim().toLowerCase() !== input.email) {
+      throw new HttpError(409, 'roundtable_survey_email_mismatch', 'Roundtable email must match the survey email.')
+    }
+    return row?.id ?? null
+  }
+
+  const latest = await findLatestSubmissionByEmail(client, input.email)
+  return latest?.id ?? null
+}
+
+async function findByIdempotencyKey(client: pg.PoolClient, key: string) {
+  const result = await client.query<RoundtableRow>(
     `
-    SELECT id
-    FROM public.cwi_survey_submissions
+    SELECT id, email, payload_hash, registered, registered_at, submission_id
+    FROM public.cwi_roundtable_registrations
     WHERE idempotency_key = $1
+      AND registered = true
     LIMIT 1
     `,
-    [input.surveySubmissionIdempotencyKey],
+    [key],
   )
 
-  return result.rows[0]?.id ?? null
+  return result.rows[0] ?? null
 }
 
-async function syncSubmissionRoundtableFlag(client: pg.PoolClient, submissionId: string | null) {
-  if (!submissionId) return
-
-  await client.query(
+async function findBySurveyKey(client: pg.PoolClient, key: string) {
+  const result = await client.query<RoundtableRow>(
     `
-    UPDATE public.cwi_survey_submissions
-    SET roundtable_registered = true
-    WHERE id = $1
+    SELECT id, email, payload_hash, registered, registered_at, submission_id
+    FROM public.cwi_roundtable_registrations
+    WHERE survey_submission_idempotency_key = $1
+      AND registered = true
+    LIMIT 1
     `,
-    [submissionId],
+    [key],
   )
+
+  return result.rows[0] ?? null
 }
 
-async function linkExistingRegistration(
-  client: pg.PoolClient,
-  row: ExistingRegistrationRow,
-  linkedSubmissionId: string | null,
-) {
-  if (row.submission_id || !linkedSubmissionId) return row
-
-  const linked = await client.query<ExistingRegistrationRow>(
-    `
-    UPDATE public.cwi_roundtable_registrations
-    SET submission_id = $1,
-        linked_at = COALESCE(linked_at, now()),
-        updated_at = now()
-    WHERE id = $2
-      AND submission_id IS NULL
-    RETURNING id, payload_hash, registered_at, submission_id
-    `,
-    [linkedSubmissionId, row.id],
-  )
-
-  return linked.rows[0] ?? row
+async function completeExistingRegistration(client: pg.PoolClient, row: RoundtableRow, linkedSubmissionId: string | null, email: string) {
+  const linkedRow = await linkRoundtableIfUnlinked(client, row, linkedSubmissionId)
+  await syncSurveyRoundtableFlags(client, email)
+  return linkedRow
 }
 
 export class PgRoundtableRepository implements RoundtableRepository {
   constructor(private readonly pool: pg.Pool) {}
 
+  async checkRegistration(email: string) {
+    const result = await this.pool.query<{ registered: boolean }>(
+      `
+      SELECT EXISTS (
+        SELECT 1
+        FROM public.cwi_roundtable_registrations
+        WHERE lower(btrim(email)) = $1
+          AND registered = true
+      ) AS registered
+      `,
+      [email],
+    )
+
+    return { registered: Boolean(result.rows[0]?.registered) }
+  }
+
   async createRegistration(input: NormalizedRoundtableRegistration, meta: RequestMeta): Promise<RoundtableRegistrationCreateResult> {
     return withTransaction(this.pool, async (client) => {
-      const linkedSubmissionId = await findLinkedSubmission(client, input)
-
       if (input.idempotencyKey) {
-        const existing = await client.query<ExistingRegistrationRow>(
-          `
-          SELECT id, payload_hash, registered_at, submission_id
-          FROM public.cwi_roundtable_registrations
-          WHERE idempotency_key = $1
-          LIMIT 1
-          `,
-          [input.idempotencyKey],
-        )
-
-        const row = existing.rows[0]
-        if (row) {
-          assertSamePayload(row, input)
-          const linkedRow = await linkExistingRegistration(client, row, linkedSubmissionId)
-          await syncSubmissionRoundtableFlag(client, linkedRow.submission_id)
-
+        const existing = await findByIdempotencyKey(client, input.idempotencyKey)
+        if (existing) {
+          assertSamePayload(existing, input)
+          await lockRoundtableEmail(client, input.email)
+          const linkedSubmissionId = await findSubmissionForInput(client, input)
+          const linkedRow = await completeExistingRegistration(client, existing, linkedSubmissionId, input.email)
           return {
             deduplicated: true,
             id: linkedRow.id,
@@ -131,29 +148,48 @@ export class PgRoundtableRepository implements RoundtableRepository {
         }
       }
 
-      if (input.surveySubmissionIdempotencyKey) {
-        const existingBySurveyKey = await client.query<ExistingRegistrationRow>(
-          `
-          SELECT id, payload_hash, registered_at, submission_id
-          FROM public.cwi_roundtable_registrations
-          WHERE survey_submission_idempotency_key = $1
-          LIMIT 1
-          `,
-          [input.surveySubmissionIdempotencyKey],
-        )
+      await lockRoundtableEmail(client, input.email)
 
-        const row = existingBySurveyKey.rows[0]
-        if (row) {
-          assertSamePayload(row, input)
-          const linkedRow = await linkExistingRegistration(client, row, linkedSubmissionId)
-          await syncSubmissionRoundtableFlag(client, linkedRow.submission_id)
-
+      // Re-read after the advisory lock so simultaneous requests cannot create two email registrations.
+      if (input.idempotencyKey) {
+        const existing = await findByIdempotencyKey(client, input.idempotencyKey)
+        if (existing) {
+          assertSamePayload(existing, input)
+          const linkedSubmissionId = await findSubmissionForInput(client, input)
+          const linkedRow = await completeExistingRegistration(client, existing, linkedSubmissionId, input.email)
           return {
             deduplicated: true,
             id: linkedRow.id,
             linkedSubmissionId: linkedRow.submission_id,
             registeredAt: dateToIso(linkedRow.registered_at),
           }
+        }
+      }
+
+      const linkedSubmissionId = await findSubmissionForInput(client, input)
+      const existingBySurveyKey = input.surveySubmissionIdempotencyKey
+        ? await findBySurveyKey(client, input.surveySubmissionIdempotencyKey)
+        : null
+
+      if (existingBySurveyKey) {
+        assertSamePayload(existingBySurveyKey, input)
+        const linkedRow = await completeExistingRegistration(client, existingBySurveyKey, linkedSubmissionId, input.email)
+        return {
+          deduplicated: true,
+          id: linkedRow.id,
+          linkedSubmissionId: linkedRow.submission_id,
+          registeredAt: dateToIso(linkedRow.registered_at),
+        }
+      }
+
+      const existingByEmail = await findRoundtableByEmail(client, input.email)
+      if (existingByEmail) {
+        const linkedRow = await completeExistingRegistration(client, existingByEmail, linkedSubmissionId, input.email)
+        return {
+          deduplicated: true,
+          id: linkedRow.id,
+          linkedSubmissionId: linkedRow.submission_id,
+          registeredAt: dateToIso(linkedRow.registered_at),
         }
       }
 
@@ -200,7 +236,7 @@ export class PgRoundtableRepository implements RoundtableRepository {
         throw new HttpError(500, 'roundtable_insert_failed', 'Failed to create roundtable registration.')
       }
 
-      await syncSubmissionRoundtableFlag(client, row.submission_id)
+      await syncSurveyRoundtableFlags(client, input.email)
 
       return {
         deduplicated: false,

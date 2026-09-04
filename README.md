@@ -23,6 +23,8 @@ Health:
 Public:
 - `POST /api/v1/survey-submissions`
 - `POST /api/v1/roundtable-registrations`
+- `GET /api/v1/public/report-jobs/:id/status` (requires the per-report `X-CWI-Report-Token` header)
+- `GET /api/v1/public/report-jobs/:id/html` (requires the per-report `X-CWI-Report-Token` header)
 
 Admin auth:
 - `POST /api/v1/auth/login`
@@ -89,6 +91,25 @@ The backend stores canonical question text from `src/modules/survey/surveyQuesti
 
 `deploy/update-production.sh` fetches `origin/main`, creates isolated Git worktrees, installs/builds all three applications, runs liveness/readiness and static smoke checks, then replaces the PM2 processes with the staged release. It keeps the previous release available for rollback and never runs database migrations during a code deploy.
 
+## V3 Report Pipeline
+
+The asynchronous report pipeline is opt-in. Before enabling it in an environment, apply
+`D:\CWI\supabase-cwi\supabase\manual_sql\20260903_0000_add_v3_report_email_bridge.sql` manually in the matching Supabase project. The application does not apply this SQL during startup or deployment.
+
+Set these server-side flags only after the SQL and the CWI AI service are ready:
+
+- `REPORT_SERVICE_ENABLED=true` enables the dedicated report-generation worker.
+- `REPORT_SERVICE_BASE_URL` points to the internal CWI AI service; the worker calls only the registered V3 paths.
+- `REPORT_DELIVERY_ENABLED=true` enables the RabbitMQ/SMTP delivery worker.
+- `REPORT_AUTO_EMAIL_ENABLED=true` queues one automatic email after a report PDF is stored successfully.
+- `REPORT_STORAGE_BUCKET` is the private bucket for generated HTML/PDF assets.
+
+Routing follows the survey state: `part1_only` and `part2_refused_privacy` use `POST /v3/reports/anonymous`; `full_private_report` uses `POST /v3/reports/personalized`. The worker polls `GET /v3/report-jobs/{job_id}`, fetches the completed HTML from `GET /v3/reports/{report_id}`, validates and renders it with the configured Chromium/Chrome/Edge executable, uploads HTML and PDF to private Supabase Storage, then creates the email job in the same database transaction as the completed report state. The email worker sends through SMTP with bounded concurrency, leases, retry backoff, and delivery-ambiguous protection.
+
+When report generation is enabled, the survey response also contains a short-lived, HMAC-signed access token scoped to that report job. The frontend polls the public status endpoint and fetches the HTML once `htmlAvailable=true`; it renders the returned document in a sandboxed iframe. HTML is published before PDF rendering, while the generation worker keeps its database lease until PDF and email-job creation complete, so another worker cannot process the same job concurrently. The public endpoints return no participant data, Storage URL, error detail, or report payload metadata.
+
+The PM2 process `cwi-report-generation-worker` handles AI/PDF work separately from `cwi-report-delivery-worker`. Keep report generation at one process on a small server; scale only after measuring CWI AI, browser, database, storage, and SMTP capacity. A failed email is exposed through the admin `emailStatus=failed` filter and can be retried per submission. Automatic reports are never replaced by a manual upload after an email has been sent.
+
 ## Supabase
 
 Manual SQL is in:
@@ -97,4 +118,4 @@ Manual SQL is in:
 D:\CWI\supabase-cwi\supabase\manual_sql
 ```
 
-Codex must not apply migrations directly. Review and execute SQL manually from the CWI Supabase project only.
+Review and execute migrations manually from the CWI Supabase project only.

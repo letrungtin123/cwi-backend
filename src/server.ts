@@ -9,6 +9,7 @@ import { PgAuthRepository } from './modules/auth/authRepository.js'
 import { AuthService } from './modules/auth/authService.js'
 import { ReportAssetStorage } from './modules/reports/reportAssetStorage.js'
 import { PgReportRepository } from './modules/reports/reportRepository.js'
+import { ReportAccessTokenService } from './modules/reports/reportAccessToken.js'
 import { PgRoundtableRepository } from './modules/roundtable/roundtableRepository.js'
 import { RoundtableService } from './modules/roundtable/roundtableService.js'
 import { PgSurveyRepository } from './modules/survey/surveyRepository.js'
@@ -30,6 +31,10 @@ const config: RuntimeConfig = {
   adminExportEnabled: env.adminExportEnabled,
   reportDeliveryEnabled: env.reportDeliveryEnabled,
   reportDeliveryBucket: env.reportDeliveryBucket,
+  reportStorageBucket: env.reportStorageBucket,
+  reportAutoEmailEnabled: env.reportAutoEmailEnabled,
+  reportPublicTokenSecret: env.reportPublicTokenSecret,
+  reportPublicTokenTtlSeconds: env.reportPublicTokenTtlSeconds,
   reportUploadMaxBytes: env.reportUploadMaxBytes,
   auth: {
     cookieDomain: env.authCookieDomain,
@@ -71,7 +76,7 @@ const submissionReportStorage = new ReportAssetStorage({
   storageUrl: env.supabaseStorageUrl,
   timeoutMs: env.reportStorageUploadTimeoutMs,
 })
-const reportDeliveryRepository = new PgReportDeliveryRepository(pool)
+const reportDeliveryRepository = new PgReportDeliveryRepository(pool, env.reportStorageBucket)
 const reportMailer = new SmtpReportMailer({
   authMode: env.mailAuthMode,
   fromAddress: env.mailFromAddress,
@@ -95,12 +100,19 @@ const reportMailer = new SmtpReportMailer({
   socketTimeoutMs: env.mailSmtpSocketTimeoutMs,
 })
 
-const surveyService = new SurveyService(surveyRepository)
+const reportAccessTokenService = new ReportAccessTokenService(config.reportPublicTokenSecret, config.reportPublicTokenTtlSeconds)
+const surveyService = new SurveyService(surveyRepository, { reportAccessTokenService, reportServiceEnabled: env.reportServiceEnabled })
 const roundtableService = new RoundtableService(roundtableRepository)
-const app = createApp({ adminRepository, authService, config, exportRepository, logger, pool, reportAssetStorage, submissionReportStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, surveyService })
+const app = createApp({ adminRepository, authService, config, exportRepository, logger, pool, reportAccessTokenService, reportAssetStorage, submissionReportStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, surveyService })
 
 const server = app.listen(env.port, env.host, () => {
-  logger.info({ host: env.host, port: env.port }, 'CWI backend listening')
+  logger.info({
+    host: env.host,
+    port: env.port,
+    reportAutoEmailEnabled: env.reportAutoEmailEnabled,
+    reportDeliveryEnabled: env.reportDeliveryEnabled,
+    reportServiceEnabled: env.reportServiceEnabled,
+  }, 'CWI backend listening')
 })
 
 async function shutdown(signal: string) {

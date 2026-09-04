@@ -15,6 +15,7 @@ import type { PgAdminRepository } from './adminRepository.js'
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const validStatuses = new Set(['part1_only', 'part2_refused_privacy', 'full_private_report'])
 const validRoundtableLinkStatuses = new Set(['linked', 'standalone'])
+const validEmailStatuses = new Set(['failed'])
 
 function parseLimit(value: unknown) {
   if (value === undefined) return 10
@@ -90,6 +91,12 @@ export function parseReportPdfUploaded(value: unknown) {
   if (value === 'true') return true
   if (value === 'false') return false
   throw new HttpError(400, 'invalid_report_pdf_uploaded_filter', 'reportPdfUploaded filter must be true or false.')
+}
+
+export function parseEmailStatus(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  if (validEmailStatuses.has(value)) return 'failed' as const
+  throw new HttpError(400, 'invalid_email_status_filter', 'emailStatus filter must be failed.')
 }
 
 function parseRoundtableLinkStatus(value: unknown) {
@@ -210,6 +217,7 @@ export function createAdminRouter(
       const cursor = parsePaginationCursor(req.query.cursor, req.query.before, req.query.beforeId, config.adminCursorSecret)
       const data = await repository.listSubmissionsPage({
         ...cursor,
+        emailStatus: parseEmailStatus(req.query.emailStatus),
         limit: parseLimit(req.query.limit),
         reportPdfUploaded: parseReportPdfUploaded(req.query.reportPdfUploaded),
         roundtableRegistered: parseRoundtable(req.query.roundtable),
@@ -226,6 +234,7 @@ export function createAdminRouter(
     try {
       const data = await repository.listSubmissions({
         ...parsePaginationCursor(req.query.cursor, req.query.before, req.query.beforeId, config.adminCursorSecret),
+        emailStatus: parseEmailStatus(req.query.emailStatus),
         limit: parseLimit(req.query.limit),
         reportPdfUploaded: parseReportPdfUploaded(req.query.reportPdfUploaded),
         roundtableRegistered: parseRoundtable(req.query.roundtable),
@@ -243,6 +252,7 @@ export function createAdminRouter(
       const page = parsePage(req.query.page)
       const limit = parseFullSubmissionLimit(req.query.limit)
       const result = await repository.listSubmissionDetails({
+        emailStatus: parseEmailStatus(req.query.emailStatus),
         limit,
         page,
         reportPdfUploaded: parseReportPdfUploaded(req.query.reportPdfUploaded),

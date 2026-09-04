@@ -17,7 +17,9 @@
     "dev:export-worker": "tsx watch src/exportWorker.ts",
     "start:export-worker": "node dist/exportWorker.js",
     "dev:report-delivery-worker": "tsx watch src/reportDeliveryWorker.ts",
-    "start:report-delivery-worker": "node dist/reportDeliveryWorker.js"
+    "start:report-delivery-worker": "node dist/reportDeliveryWorker.js",
+    "dev:report-generation-worker": "tsx watch src/reportGenerationWorker.ts",
+    "start:report-generation-worker": "node dist/reportGenerationWorker.js"
   },
   "dependencies": {
     "amqplib": "^0.10.9",
@@ -29,11 +31,16 @@
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
-    "nodemailer": "^7.0.13",
+    "nodemailer": "9.1.1",
     "pg": "^8.13.1",
     "pino": "^9.6.0",
     "pino-http": "^10.4.0",
     "zod": "^3.24.1"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "11.1.1"
+    }
   },
   "devDependencies": {
     "@types/amqplib": "^0.10.8",

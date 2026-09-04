@@ -2,12 +2,29 @@ import type pg from 'pg'
 import { withTransaction } from '../../db/transaction.js'
 import { HttpError } from '../../http/errors.js'
 import type { RequestMeta } from '../../http/requestMeta.js'
+import {
+  findRoundtableById,
+  findRoundtableByEmail,
+  linkRoundtableIfUnlinked,
+  lockRoundtableEmail,
+  syncSurveyRoundtableFlags,
+} from '../roundtable/roundtableLinking.js'
 import type { ReportJobCreateInput } from '../reports/reportPayload.js'
 import type { NormalizedAnswer, NormalizedSurveySubmission } from './submissionValidation.js'
 
 export type SubmissionCreateResult = {
   deduplicated: boolean
   id: string
+  reportAccess?: {
+    accessToken: string
+    accessTokenExpiresAt: string
+    jobId: string
+    status: string
+  }
+  reportJob: {
+    id: string
+    status: string
+  } | null
   submittedAt: string
 }
 
@@ -19,6 +36,11 @@ type ExistingSubmissionRow = {
   id: string
   payload_hash: string
   submitted_at: Date
+}
+
+type ReportJobRow = {
+  id: string
+  status: string
 }
 
 type InsertedSubmissionRow = {
@@ -80,13 +102,28 @@ export class PgSurveyRepository implements SurveyRepository {
             )
           }
 
+          const reportJobResult = await client.query<ReportJobRow>(
+            `
+            SELECT id, status
+            FROM public.cwi_report_jobs
+            WHERE submission_id = $1
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            `,
+            [row.id],
+          )
+
           return {
             deduplicated: true,
             id: row.id,
+            reportJob: reportJobResult.rows[0] ?? null,
             submittedAt: dateToIso(row.submitted_at),
           }
         }
       }
+
+      // Survey submissions may repeat, but Roundtable registration is canonical by email.
+      await lockRoundtableEmail(client, input.participant.email)
 
       const inserted = await client.query<InsertedSubmissionRow>(
         `
@@ -163,70 +200,53 @@ export class PgSurveyRepository implements SurveyRepository {
         answerInsert.params,
       )
 
-      if (input.roundtableRegistration) {
-        if (input.roundtableRegistration.id) {
-          const linkedRoundtable = await client.query<{ id: string }>(
-            `
-            UPDATE public.cwi_roundtable_registrations
-            SET submission_id = $1,
-                full_name = $2,
-                email = $3,
-                position = $4,
-                linked_at = COALESCE(linked_at, now()),
-                updated_at = now()
-            WHERE id = $5
-              AND (submission_id IS NULL OR submission_id = $1)
-            RETURNING id
-            `,
-            [
-              submission.id,
-              input.roundtableRegistration.fullName,
-              input.roundtableRegistration.email,
-              input.roundtableRegistration.position,
-              input.roundtableRegistration.id,
-            ],
-          )
+      const explicitRoundtable = input.roundtableRegistration?.id
+        ? await findRoundtableById(client, input.roundtableRegistration.id)
+        : null
 
-          if (!linkedRoundtable.rows[0]) {
-            throw new HttpError(
-              409,
-              'roundtable_registration_link_conflict',
-              'Roundtable registration could not be linked to this survey submission.',
-            )
-          }
-        } else {
-          await client.query(
-            `
-            INSERT INTO public.cwi_roundtable_registrations (
-              submission_id,
-              registered,
-              full_name,
-              email,
-              position,
-              source,
-              client_ip_hash,
-              user_agent,
-              client_meta,
-              linked_at
-            )
-            VALUES ($1, true, $2, $3, $4, $5, $6, $7, $8::jsonb, now())
-            `,
-            [
-              submission.id,
-              input.roundtableRegistration.fullName,
-              input.roundtableRegistration.email,
-              input.roundtableRegistration.position,
-              meta.source,
-              meta.clientIpHash,
-              meta.userAgent,
-              JSON.stringify(input.clientMeta),
-            ],
-          )
+      if (input.roundtableRegistration?.id) {
+        if (!explicitRoundtable || explicitRoundtable.email.trim().toLowerCase() !== input.participant.email) {
+          throw new HttpError(409, 'roundtable_survey_email_mismatch', 'Roundtable registration must match the survey email.')
         }
       }
 
-      if (reportJob) {
+      const existingRoundtable = explicitRoundtable ?? await findRoundtableByEmail(client, input.participant.email)
+      if (existingRoundtable) {
+        await linkRoundtableIfUnlinked(client, existingRoundtable, submission.id)
+        await syncSurveyRoundtableFlags(client, input.participant.email)
+      } else if (input.roundtableRegistration) {
         await client.query(
+          `
+          INSERT INTO public.cwi_roundtable_registrations (
+            submission_id,
+            registered,
+            full_name,
+            email,
+            position,
+            source,
+            client_ip_hash,
+            user_agent,
+            client_meta,
+            linked_at
+          )
+          VALUES ($1, true, $2, $3, $4, $5, $6, $7, $8::jsonb, now())
+          `,
+          [
+            submission.id,
+            input.roundtableRegistration.fullName,
+            input.participant.email,
+            input.roundtableRegistration.position,
+            meta.source,
+            meta.clientIpHash,
+            meta.userAgent,
+            JSON.stringify(input.clientMeta),
+          ],
+        )
+        await syncSurveyRoundtableFlags(client, input.participant.email)
+      }
+
+      if (reportJob) {
+        const reportJobInserted = await client.query<ReportJobRow>(
           `
           INSERT INTO public.cwi_report_jobs (
             submission_id,
@@ -237,14 +257,23 @@ export class PgSurveyRepository implements SurveyRepository {
             next_poll_at
           )
           VALUES ($1, $2, $3, 'pending', $4::jsonb, now())
+          RETURNING id, status
           `,
           [submission.id, reportJob.reportType, reportJob.providerEndpoint, JSON.stringify(reportJob.requestPayload)],
         )
+
+        return {
+          deduplicated: false,
+          id: submission.id,
+          reportJob: reportJobInserted.rows[0] ?? null,
+          submittedAt: dateToIso(submission.submitted_at),
+        }
       }
 
       return {
         deduplicated: false,
         id: submission.id,
+        reportJob: null,
         submittedAt: dateToIso(submission.submitted_at),
       }
     })

@@ -1,5 +1,7 @@
 export type DeliveryEmailStatus = 'not_sent' | 'queued' | 'sending' | 'sent' | 'failed' | 'unknown'
 
+export type ReportEmailType = 'anonymous' | 'personalized'
+
 export type ReportDeliveryFile = {
   available: boolean
   fileName: string | null
@@ -38,11 +40,12 @@ export type ReportDeliveryCampaign = {
 
 export type ClaimedEmailJob = {
   attemptCount: number
-  campaignId: string
+  campaignId: string | null
   fileSha256: string
   id: string
   leaseToken: string
   originalFileName: string
+  reportType: ReportEmailType
   recipientEmail: string
   recipientName: string
   storageBucket: string

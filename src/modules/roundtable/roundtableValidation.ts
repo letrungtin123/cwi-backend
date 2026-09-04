@@ -12,6 +12,10 @@ export type NormalizedRoundtableRegistration = {
   surveySubmissionIdempotencyKey: string | null
 }
 
+export type NormalizedRoundtableEmailCheck = {
+  email: string
+}
+
 const idempotencyKeySchema = z
   .string()
   .trim()
@@ -27,6 +31,12 @@ const rawRoundtableRegistrationSchema = z
     idempotencyKey: idempotencyKeySchema.optional(),
     position: z.string().trim().min(1).max(160).optional(),
     surveySubmissionIdempotencyKey: idempotencyKeySchema.optional(),
+  })
+  .strict()
+
+const rawRoundtableEmailCheckSchema = z
+  .object({
+    email: z.string().trim().email().max(254),
   })
   .strict()
 
@@ -85,4 +95,14 @@ export function normalizeRoundtableRegistration(payload: unknown, headerIdempote
     ...normalizedWithoutHash,
     payloadHash: hashPayload(normalizedWithoutHash),
   }
+}
+
+export function normalizeRoundtableEmailCheck(payload: unknown): NormalizedRoundtableEmailCheck {
+  const parsed = rawRoundtableEmailCheckSchema.safeParse(payload)
+
+  if (!parsed.success) {
+    validationError('invalid_roundtable_email_check', 'Roundtable email is invalid.')
+  }
+
+  return { email: normalizeEmail(parsed.data.email) }
 }

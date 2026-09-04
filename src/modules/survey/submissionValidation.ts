@@ -332,6 +332,12 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
   })
 
   const scores = getSurveyScores(orderedAnswers)
+  const normalizedRoundtableRegistration = normalizeRoundtable(raw.roundtableRegistration)
+  const participantEmail = normalizeEmail(raw.participant.email)
+  if (normalizedRoundtableRegistration && normalizedRoundtableRegistration.email !== participantEmail) {
+    validationError('roundtable_email_mismatch', 'Roundtable registration email must match participant email.')
+  }
+
   const normalizedWithoutHash: Omit<NormalizedSurveySubmission, 'payloadHash'> = {
     answers: orderedAnswers,
     clientMeta: raw.clientMeta ?? {},
@@ -339,12 +345,12 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
     part1Completed: true,
     part2Completed: rule.requiredPart === 'all',
     participant: {
-      email: normalizeEmail(raw.participant.email),
+      email: participantEmail,
       fullName: normalizeText(raw.participant.fullName),
       position: normalizeText(raw.participant.position),
     },
     privacyConsent: raw.privacyConsent,
-    roundtableRegistration: normalizeRoundtable(raw.roundtableRegistration),
+    roundtableRegistration: normalizedRoundtableRegistration,
     scores,
     statusNote: raw.statusNote ? normalizeText(raw.statusNote) : rule.defaultNote,
     submissionStatus: raw.submissionStatus,
@@ -355,4 +361,3 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
     payloadHash: hashPayload(normalizedWithoutHash),
   }
 }
-

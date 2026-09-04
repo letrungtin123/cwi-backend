@@ -114,6 +114,7 @@ rollback_pm2() {
   echo "Health check failed; attempting PM2 rollback to ${previous_release}" >&2
   pm2 delete cwi-backend >/dev/null 2>&1 || true
   pm2 delete cwi-public >/dev/null 2>&1 || true
+  pm2 delete cwi-report-generation-worker >/dev/null 2>&1 || true
   pm2 delete cwi-report-delivery-worker >/dev/null 2>&1 || true
   start_release "${previous_release}"
   pm2 save >/dev/null
@@ -201,10 +202,13 @@ rollout_started=1
 pm2 stop cwi-backend >/dev/null 2>&1 || true
 pm2 stop cwi-export-worker >/dev/null 2>&1 || true
 pm2 stop cwi-public >/dev/null 2>&1 || true
+pm2 stop cwi-report-generation-worker >/dev/null 2>&1 || true
 pm2 stop cwi-report-delivery-worker >/dev/null 2>&1 || true
 pm2 delete cwi-backend >/dev/null 2>&1 || true
 pm2 delete cwi-export-worker >/dev/null 2>&1 || true
 pm2 delete cwi-public >/dev/null 2>&1 || true
+pm2 delete cwi-report-generation-worker >/dev/null 2>&1 || true
+pm2 delete cwi-report-delivery-worker >/dev/null 2>&1 || true
 start_release "${release_dir}"
 pm2 save
 
@@ -216,5 +220,3 @@ fi
 ln -sfn "${release_dir}" "${current_link}"
 rollout_succeeded=1
 echo "Production update completed from Git origin/main at ${release_dir}"
-
-

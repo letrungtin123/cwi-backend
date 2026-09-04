@@ -66,5 +66,17 @@ module.exports = {
       exp_backoff_restart_delay: 100,
       max_restarts: 10,
     },
+    {
+      name: 'cwi-report-generation-worker',
+      cwd: backendRoot,
+      script: 'deploy/start-report-generation-worker.mjs',
+      interpreter: nodePath,
+      env: { NODE_ENV: nodeEnv },
+      env_production: { NODE_ENV: 'production', ...productionBackendEnv },
+      autorestart: true,
+      max_memory_restart: '768M',
+      exp_backoff_restart_delay: 100,
+      max_restarts: 10,
+    },
   ],
 }

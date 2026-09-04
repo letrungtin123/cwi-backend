@@ -12,6 +12,12 @@ export function createSurveyRouter(service: SurveyService, config: RuntimeConfig
       res.status(result.deduplicated ? 200 : 201).json({
         data: {
           deduplicated: result.deduplicated,
+          report: result.reportAccess ? {
+            accessToken: result.reportAccess.accessToken,
+            accessTokenExpiresAt: result.reportAccess.accessTokenExpiresAt,
+            jobId: result.reportAccess.jobId,
+            status: result.reportAccess.status,
+          } : null,
           submissionId: result.id,
           submittedAt: result.submittedAt,
         },

@@ -14,6 +14,10 @@ For the current IP-only HTTP test deployment, CWI_NODE_ENV defaults to developme
 
 The backend and the combined public router are managed by PM2. The router serves both frontend `dist` directories and proxies `/api` to the loopback backend. It requests an uncompressed upstream response so the browser receives a valid JSON body.
 
+Report generation and delivery are separate opt-in workers in the backend PM2 ecosystem. Apply the V3 bridge SQL manually before enabling `REPORT_SERVICE_ENABLED`, `REPORT_DELIVERY_ENABLED`, or `REPORT_AUTO_EMAIL_ENABLED`. Keep `REPORT_SERVICE_BASE_URL` internal to the server, use the private `REPORT_STORAGE_BUCKET`, and do not commit any SMTP, Supabase, RabbitMQ, or CWI AI credentials.
+
+The deployment script stops and removes both report workers before starting the staged ecosystem. This prevents an old report-generation worker from surviving a release and processing the same database queue alongside the new release.
+
 ```bash
 cd "$HOME/cwi-platform/repos/cwi-backend"
 bash deploy/update-production.sh

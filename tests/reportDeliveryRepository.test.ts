@@ -30,6 +30,27 @@ describe("PgReportDeliveryRepository", () => {
     }])
   })
 
+  it("does not read or clean up the file again after the upload transaction commits", async () => {
+    const clientQuery = vi.fn().mockResolvedValue({ rows: [] })
+    const pool = {
+      connect: vi.fn().mockResolvedValue({ query: clientQuery, release: vi.fn() }),
+      query: vi.fn(),
+    }
+    const repository = new PgReportDeliveryRepository(pool as unknown as pg.Pool)
+
+    await expect(repository.saveFile({
+      fileName: "Bao cao.pdf",
+      fileSize: 1024,
+      sha256: "a".repeat(64),
+      storageBucket: "cwi-submission-report-pdfs",
+      storagePath: "submissions/2026/08/submission-id/file.pdf",
+      submissionId: "submission-id",
+      uploadedBy: "admin-id",
+    })).resolves.toEqual({ previousPath: null })
+    expect(pool.query).not.toHaveBeenCalled()
+    expect(clientQuery).toHaveBeenLastCalledWith("COMMIT")
+  })
+
   it("returns the original filename when claiming an email job", async () => {
     const query = vi.fn().mockResolvedValue({
       rows: [{
@@ -43,14 +64,18 @@ describe("PgReportDeliveryRepository", () => {
         file_sha256: "a".repeat(64),
         attempt_count: 1,
         original_file_name: "Báo cáo khảo sát Q3 2026.pdf",
+        report_job_id: "report-job-id",
+        report_type: "anonymous",
       }],
     })
     const repository = new PgReportDeliveryRepository({ query } as unknown as pg.Pool)
 
     await expect(repository.claimJob("job-id", "worker-id", 60_000)).resolves.toMatchObject({
       originalFileName: "Báo cáo khảo sát Q3 2026.pdf",
+      reportType: "anonymous",
     })
     expect(String(query.mock.calls[0]?.[0])).toContain("original_file_name")
+    expect(String(query.mock.calls[0]?.[0])).toContain("report_job_id")
     expect(String(query.mock.calls[0]?.[0])).not.toContain("published_at IS NOT NULL")
     expect(String(query.mock.calls[0]?.[0])).not.toContain("FOR UPDATE OF j SKIP LOCKED")
   })

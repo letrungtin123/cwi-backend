@@ -54,6 +54,7 @@ export type SubmissionFullItem = SubmissionListItem & {
 }
 
 export type SubmissionDetailListFilters = {
+  emailStatus?: 'failed' | null
   limit: number
   page: number
   reportPdfUploaded: boolean | null
@@ -111,6 +112,7 @@ type RoundtableRow = {
 export type SubmissionListFilters = {
   before: Date | null
   beforeId: string | null
+  emailStatus?: 'failed' | null
   limit: number
   reportPdfUploaded: boolean | null
   roundtableRegistered: boolean | null
@@ -523,6 +525,15 @@ function appendSubmissionDetailFilters(
            )`,
     )
   }
+
+  if (filters.emailStatus === 'failed') {
+    where.push(`EXISTS (
+      SELECT 1
+      FROM public.cwi_report_email_jobs AS email_job
+      WHERE email_job.submission_id = s.id
+        AND email_job.status = 'failed'
+    )`)
+  }
 }
 
 export class PgAdminRepository {
@@ -681,6 +692,15 @@ export class PgAdminRepository {
                WHERE uploaded_report.submission_id = s.id
              )`,
       )
+    }
+
+    if (filters.emailStatus === 'failed') {
+      where.push(`EXISTS (
+        SELECT 1
+        FROM public.cwi_report_email_jobs AS email_job
+        WHERE email_job.submission_id = s.id
+          AND email_job.status = 'failed'
+      )`)
     }
 
     if (filters.search) {

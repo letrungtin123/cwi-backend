@@ -46,6 +46,7 @@ function exposeStatus(status: Awaited<ReturnType<PgReportDeliveryRepository['get
 export function createReportDeliveryRouter(
   repository: PgReportDeliveryRepository,
   storage: ReportAssetStorage,
+  generatedStorage: ReportAssetStorage,
   mailer: SmtpReportMailer,
   authService: AuthService,
   config: RuntimeConfig,
@@ -78,6 +79,7 @@ export function createReportDeliveryRouter(
   router.put('/submissions/:submissionId/report-pdf', async (req, res, next) => {
     let upload: Awaited<ReturnType<typeof parsePdfUpload>> | null = null
     let uploadedPath: string | null = null
+    let fileSaved = false
     try {
       enabled(config)
       const session = assertAdmin(req)
@@ -95,10 +97,11 @@ export function createReportDeliveryRouter(
         submissionId,
         uploadedBy: session.user.id,
       })
+      fileSaved = true
       if (saved.previousPath && saved.previousPath !== uploadedPath) await storage.removeFile(saved.previousPath).catch(() => undefined)
       res.status(201).json({ data: exposeStatus(await repository.getStatus(submissionId)) })
     } catch (error) {
-      if (uploadedPath) await storage.removeFile(uploadedPath).catch(() => undefined)
+      if (!fileSaved && uploadedPath) await storage.removeFile(uploadedPath).catch(() => undefined)
       next(mapRepositoryError(error))
     } finally {
       if (upload) await removeParsedPdfUpload(upload)
@@ -110,15 +113,31 @@ export function createReportDeliveryRouter(
       enabled(config)
       assertAdmin(req)
       const submissionId = assertUuid(req.params.submissionId, 'invalid_submission_id')
-      const file = await repository.getFileRecord(submissionId)
-      if (!file || !file.storage_path) throw new HttpError(404, "report_pdf_missing", "Lượt gửi này chưa có file PDF.")
-      const download = await storage.download(file.storage_path)
+      const file = await repository.getDownloadRecord(submissionId)
+      if (!file) throw new HttpError(404, 'report_pdf_missing', 'Lượt gửi này chưa có file PDF.')
+      const selectedStorage = file.storageBucket === config.reportDeliveryBucket
+        ? storage
+        : file.storageBucket === config.reportStorageBucket
+          ? generatedStorage
+          : null
+      if (!selectedStorage) throw new HttpError(500, 'report_storage_error', 'Đường dẫn file báo cáo không hợp lệ.')
+      const download = await selectedStorage.download(file.storagePath)
       res.setHeader('Cache-Control', 'private, no-store')
       res.setHeader('Content-Type', 'application/pdf')
-      res.setHeader('Content-Disposition', contentDispositionAttachment(file.original_file_name))
+      res.setHeader('Content-Disposition', contentDispositionAttachment(file.originalFileName))
       res.setHeader('X-Content-Type-Options', 'nosniff')
       if (download.contentLength) res.setHeader('Content-Length', download.contentLength)
       Readable.fromWeb(download.body as globalThis.ReadableStream<Uint8Array>).pipe(res)
+    } catch (error) { next(mapRepositoryError(error)) }
+  })
+
+  router.post('/submissions/:submissionId/retry-email', async (req, res, next) => {
+    try {
+      enabled(config)
+      assertAdmin(req)
+      const submissionId = assertUuid(req.params.submissionId, 'invalid_submission_id')
+      const status = await repository.retryEmail(submissionId)
+      res.status(202).json({ data: exposeStatus(status) })
     } catch (error) { next(mapRepositoryError(error)) }
   })
 

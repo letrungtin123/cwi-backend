@@ -6,6 +6,9 @@ import { PdfRenderError, type ReportPdfRenderer, type StoredHtml } from './repor
 import { ReportServiceClient, ReportServiceError, type CompletedReport } from './reportServiceClient.js'
 
 export type ReportWorkerConfig = {
+  autoEmailEnabled: boolean
+  generatedPdfFileName: string
+  generatedStorageBucket: string
   enabled: boolean
   initialPollDelayMs: number
   lockMs: number
@@ -99,7 +102,6 @@ export class ReportWorker {
     this.timer = setTimeout(() => {
       void this.tick()
     }, delayMs)
-    this.timer.unref?.()
   }
 
   private async tick() {
@@ -159,7 +161,13 @@ export class ReportWorker {
     const status = await this.dependencies.client.getJob(job.aiJobId)
 
     if (status.status === 'failed') {
-      await this.dependencies.repository.markFailed(job.id, job.attemptCount + 1, status.error_code ?? 'ai_report_failed', 'AI report job failed.')
+      await this.handleJobError(
+        job,
+        new ReportServiceError('AI report job failed.', {
+          code: status.error_code ?? 'ai_report_failed',
+          retryable: status.retryable === true,
+        }),
+      )
       return
     }
 
@@ -176,7 +184,11 @@ export class ReportWorker {
     }
 
     await this.dependencies.repository.markPdfGenerating(job.id, status.report_id)
-    await this.generateAndUploadReportAssets(job, status.report_id)
+    try {
+      await this.generateAndUploadReportAssets({ ...job, aiReportId: status.report_id, status: 'generating_pdf' }, status.report_id)
+    } catch (error) {
+      await this.handleJobError({ ...job, aiReportId: status.report_id, status: 'generating_pdf' }, error)
+    }
   }
 
   private async generateAndUploadReportAssets(job: ClaimedReportJob, reportId: string) {
@@ -185,17 +197,25 @@ export class ReportWorker {
     try {
       const report = await this.dependencies.client.getReport(reportId)
       storedHtml = await this.dependencies.pdfRenderer.storeHtml(job.submissionId, report.report_id, report.report.html)
-      const pdf = await this.dependencies.pdfRenderer.renderPdf(storedHtml)
       const objectPaths = buildReportObjectPaths({ reportJobId: job.id, submissionId: job.submissionId, timestamp: job.createdAt })
 
-      await this.dependencies.assetStorage.uploadFile(objectPaths.htmlPath, storedHtml.htmlPath, 'text/html')
+      if (!job.htmlStoragePath) {
+        await this.dependencies.assetStorage.uploadFile(objectPaths.htmlPath, storedHtml.htmlPath, 'text/html')
+        await this.dependencies.repository.markHtmlReady(job.id, objectPaths.htmlPath, minimalReportForStorage(report))
+        this.dependencies.logger.info({ jobId: job.id, htmlStoragePath: objectPaths.htmlPath }, 'Report HTML published')
+      }
+
+      const pdf = await this.dependencies.pdfRenderer.renderPdf(storedHtml)
       await this.dependencies.assetStorage.uploadFile(objectPaths.pdfPath, pdf.pdfPath, 'application/pdf')
       await this.dependencies.repository.markCompleted(
         job.id,
-        objectPaths.htmlPath,
         objectPaths.pdfPath,
         pdf.sha256,
-        minimalReportForStorage(report),
+        {
+          enabled: this.dependencies.config.autoEmailEnabled,
+          fileName: this.dependencies.config.generatedPdfFileName,
+          storageBucket: this.dependencies.config.generatedStorageBucket,
+        },
       )
       this.dependencies.logger.info({ jobId: job.id, pdfStoragePath: objectPaths.pdfPath }, 'Report PDF uploaded to Supabase Storage')
     } finally {

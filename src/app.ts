@@ -16,10 +16,12 @@ import type { PgExportRepository } from './modules/exports/exportRepository.js'
 import { createAuthRouter } from './modules/auth/authRoutes.js'
 import type { AuthService } from './modules/auth/authService.js'
 import type { ReportAssetStorage } from './modules/reports/reportAssetStorage.js'
+import type { ReportAccessTokenService } from './modules/reports/reportAccessToken.js'
 import { createReportDeliveryRouter } from './modules/reportDelivery/reportDeliveryRoutes.js'
 import type { PgReportDeliveryRepository } from './modules/reportDelivery/reportDeliveryRepository.js'
 import type { SmtpReportMailer } from './modules/reportDelivery/smtpMailer.js'
 import type { PgReportRepository } from './modules/reports/reportRepository.js'
+import { createPublicReportRouter } from './modules/reports/publicReportRoutes.js'
 import { createRoundtableRouter } from './modules/roundtable/roundtableRoutes.js'
 import type { RoundtableService } from './modules/roundtable/roundtableService.js'
 import { createSurveyRouter } from './modules/survey/surveyRoutes.js'
@@ -33,6 +35,7 @@ export type AppDependencies = {
   logger: Logger
   pool: pg.Pool
   reportAssetStorage: ReportAssetStorage
+  reportAccessTokenService: ReportAccessTokenService
   submissionReportStorage: ReportAssetStorage
   reportDeliveryRepository: PgReportDeliveryRepository
   reportMailer: SmtpReportMailer
@@ -103,12 +106,23 @@ function noStore(res: Response) {
 }
 
 export function createApp(dependencies: AppDependencies) {
-  const { adminRepository, authService, config, exportRepository, logger, pool, reportAssetStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, submissionReportStorage, surveyService } = dependencies
+  const { adminRepository, authService, config, exportRepository, logger, pool, reportAccessTokenService, reportAssetStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, submissionReportStorage, surveyService } = dependencies
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', config.trustProxy)
   const pinoHttp = pinoHttpImport.default ?? pinoHttpImport
-  app.use(pinoHttp({ genReqId: (req: Request) => req.get('x-request-id') || randomUUID(), logger }))
+  app.use(pinoHttp({
+    autoLogging: {
+      ignore: (req) => ['/health', '/healthz', '/readyz'].includes(req.url ?? ''),
+    },
+    customLogLevel: (_req, res, error) => {
+      if (error || res.statusCode >= 500) return 'error'
+      if (res.statusCode >= 400) return 'warn'
+      return 'debug'
+    },
+    genReqId: (req: Request) => req.get('x-request-id') || randomUUID(),
+    logger,
+  }))
   app.use(helmet())
   app.use(compression())
   app.use(cors(createCorsOptions(config)))
@@ -134,8 +148,9 @@ export function createApp(dependencies: AppDependencies) {
   app.use('/api/v1/auth', createAuthRouter(authService, config))
   app.use('/api/v1/roundtable-registrations', createRoundtableRouter(roundtableService, config))
   app.use('/api/v1/survey-submissions', createSurveyRouter(surveyService, config))
+  app.use('/api/v1/public', createPublicReportRouter(reportRepository, reportAssetStorage, reportAccessTokenService))
   app.use('/api/v1/admin', createAdminRouter(adminRepository, reportRepository, reportAssetStorage, exportRepository, authService, config))
-  app.use('/api/v1/admin/report-delivery', createReportDeliveryRouter(reportDeliveryRepository, submissionReportStorage, reportMailer, authService, config))
+  app.use('/api/v1/admin/report-delivery', createReportDeliveryRouter(reportDeliveryRepository, submissionReportStorage, reportAssetStorage, reportMailer, authService, config))
   app.use(handleNotFound)
   app.use(handleError(logger))
   return app
