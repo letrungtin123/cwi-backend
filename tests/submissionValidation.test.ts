@@ -57,6 +57,26 @@ describe('normalizeSurveySubmission', () => {
     expect(reportPayload.answers).toHaveLength(18)
   })
 
+  it('preserves the registered Vietnamese label for question 17', () => {
+    const submission = normalizeSurveySubmission(
+      {
+        answers: [
+          ...partOneAnswers().filter((answer) => answer.idx !== 17),
+          { answer: 'CEO và Nhân sự chưa thống nhất', idx: 17 },
+        ],
+        participant,
+        privacyConsent: 'not_applicable',
+        submissionStatus: 'part1_only',
+      },
+      'survey-key-q17',
+    )
+
+    const reportPayload = buildAnonymousReportPayload(submission)
+    expect(reportPayload.answers.find((answer) => answer.idx === 17)?.answer).toBe(
+      'CEO và Nhân sự chưa thống nhất',
+    )
+  })
+
   it('keeps all 24 answers for part2_refused_privacy submissions', () => {
     const submission = normalizeSurveySubmission(
       {

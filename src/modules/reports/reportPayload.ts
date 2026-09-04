@@ -60,7 +60,6 @@ const aiQuestionTextByIdx = new Map<number, string>([
 const aiOtherTextIdxs = new Set([17, 18, 19, 20, 21, 22])
 
 const aiAnswerLabelByIdx = new Map<number, Map<string, string>>([
-  [17, new Map([['CEO và Nhân sự chưa thống nhất', 'CEO và HR chưa thống nhất']])],
   [23, new Map([
     // V3 validates revenue answers against its registered labels. Keep the
     // local survey labels unchanged and translate only at the AI boundary.
