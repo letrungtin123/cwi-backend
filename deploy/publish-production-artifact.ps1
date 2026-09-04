@@ -51,9 +51,14 @@ Invoke-Checked 'scp' ($sshOptions + @($artifactPath, "${remoteTarget}:$remoteInc
 $installer = Join-Path $backendPath 'deploy/install-production-artifact.sh'
 $installArgs = @('--artifact', $remoteIncoming)
 if ($PruneLegacySource) { $installArgs += '--prune-legacy-source' }
-$installCommand = 'bash -s -- ' + (($installArgs | ForEach-Object { "'$_'" }) -join ' ')
-$installerContent = (Get-Content -LiteralPath $installer -Raw) -replace "`r`n", "`n" -replace "`r", "`n"
-$installerContent | & ssh @sshOptions $remoteTarget $installCommand
-if ($LASTEXITCODE -ne 0) { throw "Remote artifact installation failed with exit code $LASTEXITCODE" }
+$remoteInstaller = "$remoteHome/cwi-platform/incoming/.install-$artifactName.sh"
+Invoke-Checked 'scp' ($sshOptions + @($installer, "${remoteTarget}:$remoteInstaller"))
+$installCommand = "bash '$remoteInstaller' " + (($installArgs | ForEach-Object { "'$_'" }) -join ' ')
+try {
+  & ssh @sshOptions $remoteTarget $installCommand
+  if ($LASTEXITCODE -ne 0) { throw "Remote artifact installation failed with exit code $LASTEXITCODE" }
+} finally {
+  & ssh @sshOptions $remoteTarget "rm -f '$remoteInstaller'" | Out-Null
+}
 
 Write-Output "Published $artifactName to $remoteTarget"
