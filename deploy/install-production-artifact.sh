@@ -76,6 +76,8 @@ mkdir -p "$stage_dir"
 cleanup() {
   [[ -z "$backend_pid" ]] || kill "$backend_pid" >/dev/null 2>&1 || true
   [[ -z "$public_pid" ]] || kill "$public_pid" >/dev/null 2>&1 || true
+  [[ -z "$backend_pid" ]] || wait "$backend_pid" >/dev/null 2>&1 || true
+  [[ -z "$public_pid" ]] || wait "$public_pid" >/dev/null 2>&1 || true
   [[ -d "$stage_dir" ]] && rm -rf "$stage_dir"
 }
 trap cleanup EXIT
@@ -113,6 +115,9 @@ stage_dir=''
 
 previous_release=''
 if [[ -L "$current_link" ]]; then previous_release="$(readlink -f "$current_link" || true)"; fi
+if [[ -z "$previous_release" && -d "${platform_root}/repos/cwi-backend" ]]; then
+  previous_release="${platform_root}/repos"
+fi
 
 wait_for_url() {
   local url="$1"
@@ -148,6 +153,15 @@ start_smoke_public() {
   public_pid="$!"
 }
 
+stop_smoke_processes() {
+  [[ -z "$backend_pid" ]] || kill "$backend_pid" >/dev/null 2>&1 || true
+  [[ -z "$public_pid" ]] || kill "$public_pid" >/dev/null 2>&1 || true
+  [[ -z "$backend_pid" ]] || wait "$backend_pid" >/dev/null 2>&1 || true
+  [[ -z "$public_pid" ]] || wait "$public_pid" >/dev/null 2>&1 || true
+  backend_pid=''
+  public_pid=''
+}
+
 start_release() {
   local root="$1"
   CWI_PLATFORM_ROOT="$root" CWI_ENV_FILE="$env_file" DOTENV_CONFIG_PATH="$env_file" CWI_NODE_ENV=production CWI_PUBLIC_ORIGIN="$public_origin" \
@@ -163,6 +177,17 @@ rollback() {
 }
 
 trap 'if [[ "$rollout_started" == "true" ]]; then rollback; fi; cleanup' EXIT
+
+start_smoke_backend
+if ! wait_for_url "http://127.0.0.1:${staged_backend_port}/healthz" 30 || ! wait_for_url "http://127.0.0.1:${staged_backend_port}/readyz" 30; then
+  fail 'Staged backend health check failed.'
+fi
+start_smoke_public
+if ! wait_for_url "http://127.0.0.1:${staged_public_port}/" 30 || ! wait_for_url "http://127.0.0.1:${staged_public_port}/dashboard/" 30; then
+  fail 'Staged frontend health check failed.'
+fi
+stop_smoke_processes
+
 rollout_started='true'
 pm2 delete cwi-backend cwi-export-worker cwi-public cwi-report-generation-worker cwi-report-delivery-worker >/dev/null 2>&1 || true
 start_release "$release_dir"
@@ -173,6 +198,7 @@ if ! wait_for_url 'http://127.0.0.1:8088/healthz' 30 || ! wait_for_url 'http://1
 fi
 
 ln -sfn "$release_dir" "$current_link"
+rollout_started='false'
 rm -f "$release_root/.artifact-backend-smoke.log" "$release_root/.artifact-public-smoke.log"
 rm -f "$artifact"
 
@@ -192,6 +218,5 @@ if [[ "$prune_legacy_source" == 'true' ]]; then
     ! -exec test -f '{}/.artifact-release' \; -print0 | xargs -0r rm -rf
 fi
 
-rollout_started='false'
 trap - EXIT
 echo "Production artifact installed: $release_dir"
