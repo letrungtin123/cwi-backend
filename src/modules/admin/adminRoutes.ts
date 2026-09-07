@@ -3,13 +3,13 @@ import { pipeline } from 'node:stream/promises'
 import { Router } from 'express'
 import type { RuntimeConfig } from '../../config/runtime.js'
 import { decodeCursor } from '../../http/cursor.js'
-import { requireAdminSession } from '../../http/adminSession.js'
+import { getRequiredAdminSession, requireAdminSession } from '../../http/adminSession.js'
 import { HttpError } from '../../http/errors.js'
 import type { AuthService } from '../auth/authService.js'
 import { createExportRouter } from '../exports/exportRoutes.js'
 import type { PgExportRepository } from '../exports/exportRepository.js'
 import { ReportAssetStorageError, type ReportAssetStorage } from '../reports/reportAssetStorage.js'
-import type { PgReportRepository } from '../reports/reportRepository.js'
+import { ReportRetryError, type PgReportRepository } from '../reports/reportRepository.js'
 import type { PgAdminRepository } from './adminRepository.js'
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -116,6 +116,10 @@ function reportStorageErrorToHttp(error: ReportAssetStorageError): HttpError {
   return new HttpError(500, 'report_storage_error', 'Report storage request failed.')
 }
 
+function reportRetryErrorToHttp(error: ReportRetryError): HttpError {
+  return new HttpError(error.statusCode, error.code, error.message)
+}
+
 function contentDisposition(value: unknown) {
   const mode = value === '1' || value === 'true' ? 'attachment' : 'inline'
   return mode + '; filename="cwi-report.pdf"'
@@ -206,6 +210,22 @@ export function createAdminRouter(
     } catch (error) {
       if (error instanceof ReportAssetStorageError) {
         next(reportStorageErrorToHttp(error))
+        return
+      }
+      next(error)
+    }
+  })
+
+  router.post('/survey-submissions/:id/retry-report', async (req, res, next) => {
+    try {
+      const session = getRequiredAdminSession(req)
+      if (session.user.role !== 'admin') throw new HttpError(403, 'admin_required', 'Bạn không có quyền tạo lại báo cáo.')
+      const id = assertUuid(req.params.id, 'invalid_submission_id', 'Submission id must be a UUID.')
+      const data = await reportRepository.retryFailedJob(id)
+      res.status(202).json({ data })
+    } catch (error) {
+      if (error instanceof ReportRetryError) {
+        next(reportRetryErrorToHttp(error))
         return
       }
       next(error)

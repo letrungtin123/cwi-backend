@@ -1,5 +1,6 @@
 import type pg from 'pg'
 import type { ReportAccepted, ReportJobStatus } from './reportServiceClient.js'
+import { normalizeStoredReportPayload } from './reportPayload.js'
 
 export type ReportJobStatusValue =
   | 'pending'
@@ -38,6 +39,17 @@ export type ReportJobDownload = {
 
 export type ReportJobAsset = {
   storagePath: string
+}
+
+export class ReportRetryError extends Error {
+  constructor(
+    readonly code: 'report_job_not_found' | 'report_job_not_failed' | 'report_job_in_progress',
+    readonly statusCode: number,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'ReportRetryError'
+  }
 }
 
 export type PublicReportJob = {
@@ -126,6 +138,93 @@ function minimalReportPayload(report: {
 
 export class PgReportRepository {
   constructor(private readonly pool: pg.Pool) {}
+
+  async retryFailedJob(submissionId: string) {
+    const client = await this.pool.connect()
+
+    try {
+      await client.query('BEGIN')
+
+      const submission = await client.query<{ id: string }>(
+        'SELECT id FROM public.cwi_survey_submissions WHERE id = $1 FOR UPDATE',
+        [submissionId],
+      )
+      if (!submission.rows[0]) {
+        throw new ReportRetryError('report_job_not_found', 404, 'Không tìm thấy lượt khảo sát để tạo lại báo cáo.')
+      }
+
+      const latest = await client.query<{
+        id: string
+        provider_endpoint: string
+        report_type: string
+        request_payload: unknown
+        status: ReportJobStatusValue
+      }>(
+        `
+        SELECT id, provider_endpoint, report_type, request_payload, status
+        FROM public.cwi_report_jobs
+        WHERE submission_id = $1
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        `,
+        [submissionId],
+      )
+      const current = latest.rows[0]
+      if (!current) {
+        throw new ReportRetryError('report_job_not_found', 404, 'Lượt khảo sát này chưa có job tạo báo cáo.')
+      }
+
+      const active = await client.query<{ id: string }>(
+        `
+        SELECT id
+        FROM public.cwi_report_jobs
+        WHERE submission_id = $1
+          AND status = ANY($2::text[])
+        LIMIT 1
+        `,
+        [submissionId, readyStatuses],
+      )
+      if (active.rows[0]) {
+        throw new ReportRetryError('report_job_in_progress', 409, 'Báo cáo của lượt khảo sát này đang được xử lý.')
+      }
+
+      if (readyStatuses.includes(current.status)) {
+        throw new ReportRetryError('report_job_in_progress', 409, 'Báo cáo của lượt khảo sát này đang được xử lý.')
+      }
+
+      if (current.status !== 'failed') {
+        throw new ReportRetryError('report_job_not_failed', 409, 'Chỉ có thể tạo lại báo cáo khi lần trước bị lỗi.')
+      }
+
+      const retried = await client.query<{ id: string; status: ReportJobStatusValue }>(
+        `
+        INSERT INTO public.cwi_report_jobs (
+          submission_id,
+          report_type,
+          provider_endpoint,
+          status,
+          request_payload,
+          next_poll_at
+        )
+        VALUES ($1, $2, $3, 'pending', $4::jsonb, now())
+        RETURNING id, status
+        `,
+        [submissionId, current.report_type, current.provider_endpoint, JSON.stringify(normalizeStoredReportPayload(current.request_payload))],
+      )
+
+      await client.query('COMMIT')
+      return {
+        jobId: retried.rows[0]?.id ?? null,
+        status: retried.rows[0]?.status ?? 'pending',
+        submissionId,
+      }
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined)
+      throw error
+    } finally {
+      client.release()
+    }
+  }
 
   async claimNextReadyJob(workerId: string, lockMs: number): Promise<ClaimedReportJob | null> {
     const result = await this.pool.query<ClaimedReportJobRow>(

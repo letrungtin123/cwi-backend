@@ -60,6 +60,9 @@ const aiQuestionTextByIdx = new Map<number, string>([
 const aiOtherTextIdxs = new Set([17, 18, 19, 20, 21, 22])
 
 const aiAnswerLabelByIdx = new Map<number, Map<string, string>>([
+  [17, new Map([
+    ['CEO và HR chưa thống nhất', 'CEO và Nhân sự chưa thống nhất'],
+  ])],
   [23, new Map([
     // V3 validates revenue answers against its registered labels. Keep the
     // local survey labels unchanged and translate only at the AI boundary.
@@ -71,6 +74,21 @@ const aiAnswerLabelByIdx = new Map<number, Map<string, string>>([
     ['Trên 10,000 tỷ VND', 'Trên 10,000 tỷ VND'],
   ])],
 ])
+
+export function normalizeStoredReportPayload(payload: unknown) {
+  if (!payload || typeof payload !== 'object' || !Array.isArray((payload as { answers?: unknown }).answers)) return payload
+
+  const source = payload as { answers: unknown[] }
+  return {
+    ...payload,
+    answers: source.answers.map((answer) => {
+      if (!answer || typeof answer !== 'object') return answer
+      const item = answer as { answer?: unknown; idx?: unknown }
+      if (item.idx !== 17 || item.answer !== 'CEO và HR chưa thống nhất') return answer
+      return { ...answer, answer: 'CEO và Nhân sự chưa thống nhất' }
+    }),
+  }
+}
 
 function aiQuestionText(idx: number) {
   return aiQuestionTextByIdx.get(idx) ?? ''
