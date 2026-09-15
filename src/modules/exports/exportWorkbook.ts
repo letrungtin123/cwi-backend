@@ -184,6 +184,7 @@ function buildSubmissionValues(row: {
   full_name: string
   part1_completed: boolean
   part2_completed: boolean
+  phone: string | null
   position: string
   privacy_consent: string
   report_status: string | null
@@ -195,6 +196,7 @@ function buildSubmissionValues(row: {
   return [
     row.full_name,
     row.email,
+    row.phone ?? '',
     row.position,
     statusLabel(row.submission_status),
     row.status_note,
@@ -267,9 +269,9 @@ export class ExportWorkbookService {
       addOverview(workbook, job)
       const primaryHeaders =
         job.dataset === 'submissions'
-          ? ['Họ tên', 'Email', 'Chức vụ', 'Trạng thái khảo sát', 'Ghi chú trạng thái', 'Bảo mật dữ liệu', 'Đã trả lời Phần 1', 'Đã trả lời Phần 2', 'Số câu trả lời', 'Đăng ký Roundtable', 'Trạng thái báo cáo', 'Thời gian gửi']
+          ? ['Họ tên', 'Email', 'Số điện thoại', 'Chức vụ', 'Trạng thái khảo sát', 'Ghi chú trạng thái', 'Bảo mật dữ liệu', 'Đã trả lời Phần 1', 'Đã trả lời Phần 2', 'Số câu trả lời', 'Đăng ký Roundtable', 'Trạng thái báo cáo', 'Thời gian gửi']
           : ['Họ tên', 'Email', 'Chức vụ', 'Tình trạng', 'Thời gian đăng ký', 'Trạng thái khảo sát', 'Trạng thái báo cáo', 'Họ tên trong khảo sát', 'Email trong khảo sát', 'Chức vụ trong khảo sát', 'Số câu trả lời', 'Bảo mật dữ liệu', 'Thời gian gửi khảo sát']
-      const primaryWidths = job.dataset === 'submissions' ? [24, 30, 24, 34, 38, 18, 18, 18, 15, 20, 22, 20] : [24, 30, 24, 18, 20, 34, 22, 24, 30, 24, 15, 18, 22]
+      const primaryWidths = job.dataset === 'submissions' ? [24, 30, 18, 24, 34, 38, 18, 18, 18, 15, 20, 22, 20] : [24, 30, 24, 18, 20, 34, 22, 24, 30, 24, 15, 18, 22]
       const primarySheet = createSheetWriter(workbook, job.dataset === 'submissions' ? 'Lượt gửi khảo sát' : 'Đăng ký Roundtable', primaryHeaders, primaryWidths)
       const answerSheet =
         job.dataset === 'submissions'
@@ -354,7 +356,6 @@ export class ExportWorkbookService {
     }
   }
 }
-
 
 
 

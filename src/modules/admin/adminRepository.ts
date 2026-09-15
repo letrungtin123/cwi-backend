@@ -25,6 +25,7 @@ export type SubmissionListItem = {
   privacyConsent: string
   report: ReportSummary
   roundtableRegistered: boolean
+  phone: string | null
   statusNote: string
   submittedAt: string
   submissionStatus: string
@@ -78,6 +79,7 @@ type SubmissionRow = {
   id: string
   part1_completed: boolean
   part2_completed: boolean
+  phone: string | null
   position: string
   privacy_consent: string
   report_job_id: string | null
@@ -239,6 +241,7 @@ const submissionSelect = `
     s.status_note,
     s.full_name,
     s.email,
+    s.phone,
     s.position,
     s.privacy_consent,
     s.part1_completed,
@@ -379,6 +382,7 @@ function mapListItem(row: SubmissionRow): SubmissionListItem {
     privacyConsent: row.privacy_consent,
     report: mapReportSummary(row),
     roundtableRegistered: row.roundtable_registered,
+    phone: row.phone,
     statusNote: row.status_note,
     submittedAt: toIso(row.submitted_at),
     submissionStatus: row.submission_status,
@@ -529,7 +533,8 @@ function appendSubmissionDetailFilters(
     where.push(
       '(s.full_name ILIKE $' + params.length +
         ' OR s.email ILIKE $' + params.length +
-        ' OR s.position ILIKE $' + params.length + ')',
+        ' OR s.position ILIKE $' + params.length +
+        ' OR s.phone ILIKE $' + params.length + ')',
     )
   }
 
@@ -603,7 +608,8 @@ export class PgAdminRepository {
           ' OR r.position ILIKE $' + params.length +
           ' OR s.full_name ILIKE $' + params.length +
           ' OR s.email ILIKE $' + params.length +
-          ' OR s.position ILIKE $' + params.length + ')',
+          ' OR s.position ILIKE $' + params.length +
+          ' OR s.phone ILIKE $' + params.length + ')',
       )
     }
 
@@ -733,7 +739,8 @@ export class PgAdminRepository {
       where.push(
         '(s.full_name ILIKE $' + params.length +
           ' OR s.email ILIKE $' + params.length +
-          ' OR s.position ILIKE $' + params.length + ')',
+          ' OR s.position ILIKE $' + params.length +
+          ' OR s.phone ILIKE $' + params.length + ')',
       )
     }
 

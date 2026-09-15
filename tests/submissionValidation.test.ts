@@ -29,6 +29,7 @@ function allAnswers() {
 const participant = {
   email: 'AN@Company.com',
   fullName: 'Nguyễn Văn An',
+  phone: '090 123 4567',
   position: 'HRM',
 }
 
@@ -48,10 +49,12 @@ describe('normalizeSurveySubmission', () => {
     expect(submission.part1Completed).toBe(true)
     expect(submission.part2Completed).toBe(false)
     expect(submission.participant.email).toBe('an@company.com')
+    expect(submission.participant.phone).toBe('+84901234567')
     expect(submission.statusNote).toContain('Phần 1')
 
     const reportPayload = buildAnonymousReportPayload(submission)
     expect(reportPayload.participant).toEqual({ position: 'HRM' })
+    expect(reportPayload).not.toHaveProperty('phone')
     expect(reportPayload.delivery_contact).toEqual({ email: 'an@company.com', full_name: 'Nguyễn Văn An' })
     expect(reportPayload.cohort_consent).toBe(false)
     expect(reportPayload.answers).toHaveLength(18)
@@ -177,6 +180,15 @@ describe('normalizeSurveySubmission', () => {
         null,
       ),
     ).toThrow(HttpError)
+  })
+
+  it('rejects a missing or invalid phone number', () => {
+    expect(() => normalizeSurveySubmission({
+      answers: partOneAnswers(),
+      participant: { ...participant, phone: '123' },
+      privacyConsent: 'not_applicable',
+      submissionStatus: 'part1_only',
+    }, null)).toThrow(HttpError)
   })
 })
 

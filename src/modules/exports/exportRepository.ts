@@ -8,6 +8,7 @@ type SubmissionExportRow = {
   full_name: string
   part1_completed: boolean
   part2_completed: boolean
+  phone: string | null
   position: string
   privacy_consent: string
   report_status: string | null
@@ -226,12 +227,12 @@ export class PgExportRepository {
     }
     if (filters.search) {
       params.push('%' + filters.search + '%')
-      where.push('(s.full_name ILIKE $' + params.length + ' OR s.email ILIKE $' + params.length + ' OR s.position ILIKE $' + params.length + ')')
+      where.push('(s.full_name ILIKE $' + params.length + ' OR s.email ILIKE $' + params.length + ' OR s.phone ILIKE $' + params.length + ' OR s.position ILIKE $' + params.length + ')')
     }
     params.push(batchSize + 1)
     const result = await this.pool.query<SubmissionExportRow>(
       [
-        'SELECT s.id, s.full_name, s.email, s.position, s.submission_status, s.status_note, s.privacy_consent,',
+        'SELECT s.id, s.full_name, s.email, s.phone, s.position, s.submission_status, s.status_note, s.privacy_consent,',
         '       s.part1_completed, s.part2_completed, s.answers_count, s.roundtable_registered, s.submitted_at,',
         '       report.status AS report_status',
         'FROM public.cwi_survey_submissions AS s',

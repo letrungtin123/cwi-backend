@@ -21,6 +21,7 @@ import { getSurveyScores, type SurveyScores } from './surveyScoring.js'
 export type Participant = {
   email: string
   fullName: string
+  phone: string
   position: string
 }
 
@@ -83,6 +84,7 @@ const rawSubmissionSchema = z
       .object({
         email: z.string().trim().email().max(254),
         fullName: z.string().trim().min(1).max(160),
+        phone: z.string().trim().min(1).max(32),
         position: z.string().trim().min(1).max(160),
       })
       .strict(),
@@ -115,6 +117,17 @@ function normalizeEmail(email: string) {
 
 function normalizeText(value: string) {
   return value.trim().replace(/\s+/g, ' ')
+}
+
+function normalizePhone(value: string) {
+  const compact = value.trim().replace(/[\s().-]/g, '')
+
+  if (/^0\d{9,10}$/.test(compact)) return `+84${compact.slice(1)}`
+  if (/^\+[1-9]\d{7,14}$/.test(compact)) return compact
+
+  validationError('invalid_phone', 'Phone number is invalid.', {
+    acceptedFormats: ['0901234567', '+84901234567'],
+  })
 }
 
 function normalizeLikertAnswer(question: SurveyQuestion, raw: RawAnswer): NormalizedAnswer {
@@ -347,6 +360,7 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
     participant: {
       email: participantEmail,
       fullName: normalizeText(raw.participant.fullName),
+      phone: normalizePhone(raw.participant.phone),
       position: normalizeText(raw.participant.position),
     },
     privacyConsent: raw.privacyConsent,

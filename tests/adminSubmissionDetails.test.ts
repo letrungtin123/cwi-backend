@@ -9,6 +9,7 @@ const submissionRow = {
   id: '2c78db0b-e97e-49ca-8a9a-2565077f0ffd',
   part1_completed: true,
   part2_completed: false,
+  phone: '+84901234567',
   position: 'CEO',
   privacy_consent: 'not_applicable',
   report_job_id: null,
@@ -52,6 +53,7 @@ describe('full submission PDF status', () => {
     })
 
     expect(result.items[0]?.reportPdfUploaded).toBe(true)
+    expect(result.items[0]?.phone).toBe('+84901234567')
     const submissionQueries = query.mock.calls
       .map(([sql]) => sql)
       .filter((sql) => sql.includes('report_pdf_uploaded') || sql.includes('cwi_submission_report_files'))

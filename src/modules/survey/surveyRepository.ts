@@ -132,6 +132,7 @@ export class PgSurveyRepository implements SurveyRepository {
           status_note,
           full_name,
           email,
+          phone,
           position,
           privacy_consent,
           part1_completed,
@@ -149,8 +150,8 @@ export class PgSurveyRepository implements SurveyRepository {
           client_meta
         )
         VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-          $11, $12, $13::jsonb, $14, $15, $16, $17, $18, $19::jsonb
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+          $12, $13, $14::jsonb, $15, $16, $17, $18, $19, $20::jsonb
         )
         RETURNING id, submitted_at
         `,
@@ -159,6 +160,7 @@ export class PgSurveyRepository implements SurveyRepository {
           input.statusNote,
           input.participant.fullName,
           input.participant.email,
+          input.participant.phone,
           input.participant.position,
           input.privacyConsent,
           input.part1Completed,
