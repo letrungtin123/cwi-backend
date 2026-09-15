@@ -10,12 +10,13 @@ import { createExportRouter } from '../exports/exportRoutes.js'
 import type { PgExportRepository } from '../exports/exportRepository.js'
 import { ReportAssetStorageError, type ReportAssetStorage } from '../reports/reportAssetStorage.js'
 import { ReportRetryError, type PgReportRepository } from '../reports/reportRepository.js'
-import type { PgAdminRepository } from './adminRepository.js'
+import type { PgAdminRepository, ReportStatusFilter } from './adminRepository.js'
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const validStatuses = new Set(['part1_only', 'part2_refused_privacy', 'full_private_report'])
 const validRoundtableLinkStatuses = new Set(['linked', 'standalone'])
 const validEmailStatuses = new Set(['failed'])
+const validReportStatuses = new Set(['not_started', 'generating', 'completed', 'failed', 'skipped'])
 
 function parseLimit(value: unknown) {
   if (value === undefined) return 10
@@ -91,6 +92,12 @@ export function parseReportPdfUploaded(value: unknown) {
   if (value === 'true') return true
   if (value === 'false') return false
   throw new HttpError(400, 'invalid_report_pdf_uploaded_filter', 'reportPdfUploaded filter must be true or false.')
+}
+
+export function parseReportStatus(value: unknown): ReportStatusFilter | null {
+  if (typeof value !== 'string' || !value.trim()) return null
+  if (validReportStatuses.has(value)) return value as ReportStatusFilter
+  throw new HttpError(400, 'invalid_report_status_filter', 'reportStatus filter is invalid.')
 }
 
 export function parseEmailStatus(value: unknown) {
@@ -239,6 +246,7 @@ export function createAdminRouter(
         ...cursor,
         emailStatus: parseEmailStatus(req.query.emailStatus),
         limit: parseLimit(req.query.limit),
+        reportStatus: parseReportStatus(req.query.reportStatus),
         reportPdfUploaded: parseReportPdfUploaded(req.query.reportPdfUploaded),
         roundtableRegistered: parseRoundtable(req.query.roundtable),
         search: parseSearch(req.query.search),
@@ -256,6 +264,7 @@ export function createAdminRouter(
         ...parsePaginationCursor(req.query.cursor, req.query.before, req.query.beforeId, config.adminCursorSecret),
         emailStatus: parseEmailStatus(req.query.emailStatus),
         limit: parseLimit(req.query.limit),
+        reportStatus: parseReportStatus(req.query.reportStatus),
         reportPdfUploaded: parseReportPdfUploaded(req.query.reportPdfUploaded),
         roundtableRegistered: parseRoundtable(req.query.roundtable),
         search: parseSearch(req.query.search),
@@ -275,6 +284,7 @@ export function createAdminRouter(
         emailStatus: parseEmailStatus(req.query.emailStatus),
         limit,
         page,
+        reportStatus: parseReportStatus(req.query.reportStatus),
         reportPdfUploaded: parseReportPdfUploaded(req.query.reportPdfUploaded),
         roundtableRegistered: parseRoundtable(req.query.roundtable),
         search: parseSearch(req.query.search),

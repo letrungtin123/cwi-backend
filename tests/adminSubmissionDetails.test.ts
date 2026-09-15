@@ -24,7 +24,7 @@ const submissionRow = {
 }
 
 function createRepository() {
-  const query = vi.fn(async (sql: string) => {
+  const query = vi.fn(async (sql: string, _params: unknown[] = []) => {
     if (sql.includes('count(*)::text AS total_items')) return { rows: [{ total_items: '1' }] }
     if (sql.includes('cwi_survey_answers')) return { rows: [] }
     if (sql.includes('cwi_roundtable_registrations')) return { rows: [] }
@@ -44,6 +44,7 @@ describe('full submission PDF status', () => {
     const result = await repository.listSubmissionDetails({
       limit: 10,
       page: 1,
+      reportStatus: null,
       reportPdfUploaded: true,
       roundtableRegistered: null,
       search: null,
@@ -64,6 +65,7 @@ describe('full submission PDF status', () => {
     await repository.listSubmissionDetails({
       limit: 10,
       page: 1,
+      reportStatus: null,
       reportPdfUploaded: false,
       roundtableRegistered: null,
       search: null,
@@ -84,6 +86,7 @@ describe('full submission PDF status', () => {
       before: null,
       beforeId: null,
       limit: 10,
+      reportStatus: null,
       reportPdfUploaded: false,
       roundtableRegistered: null,
       search: null,
@@ -95,5 +98,26 @@ describe('full submission PDF status', () => {
       .find((sql) => sql.includes('ORDER BY s.submitted_at DESC, s.id DESC'))
     expect(pageQuery).toContain('NOT EXISTS')
     expect(pageQuery).toContain('cwi_submission_report_files')
+  })
+
+  it('filters by the latest report generation status in page and count queries', async () => {
+    const { query, repository } = createRepository()
+
+    await repository.listSubmissionDetails({
+      limit: 10,
+      page: 1,
+      reportStatus: 'failed',
+      reportPdfUploaded: null,
+      roundtableRegistered: null,
+      search: null,
+      status: null,
+    })
+
+    const reportStatusQueries = query.mock.calls
+      .map(([sql]) => sql)
+      .filter((sql) => sql.includes('latest_report.status::text'))
+    expect(reportStatusQueries).toHaveLength(2)
+    expect(reportStatusQueries.every((sql) => sql.includes("= $1"))).toBe(true)
+    expect(query.mock.calls.some(([, params]) => params?.[0] === 'failed')).toBe(true)
   })
 })

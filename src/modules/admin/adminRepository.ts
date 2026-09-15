@@ -12,6 +12,8 @@ export type ReportSummary = {
   updatedAt: string | null
 }
 
+export type ReportStatusFilter = 'not_started' | 'generating' | 'completed' | 'failed' | 'skipped'
+
 export type SubmissionListItem = {
   answersCount: number
   email: string
@@ -57,6 +59,7 @@ export type SubmissionDetailListFilters = {
   emailStatus?: 'failed' | null
   limit: number
   page: number
+  reportStatus: ReportStatusFilter | null
   reportPdfUploaded: boolean | null
   roundtableRegistered: boolean | null
   search: string | null
@@ -114,6 +117,7 @@ export type SubmissionListFilters = {
   beforeId: string | null
   emailStatus?: 'failed' | null
   limit: number
+  reportStatus: ReportStatusFilter | null
   reportPdfUploaded: boolean | null
   roundtableRegistered: boolean | null
   search: string | null
@@ -486,11 +490,30 @@ function toNumber(value: string | null) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function appendLatestReportStatusFilter(where: string[], params: unknown[], reportStatus: ReportStatusFilter | null) {
+  if (reportStatus === null) return
+
+  params.push(reportStatus)
+  where.push(`COALESCE((
+    SELECT CASE
+      WHEN latest_report.status::text IN ('completed', 'sent') THEN 'completed'
+      WHEN latest_report.status::text IN ('failed', 'skipped') THEN latest_report.status::text
+      ELSE 'generating'
+    END
+    FROM public.cwi_report_jobs AS latest_report
+    WHERE latest_report.submission_id = s.id
+    ORDER BY latest_report.created_at DESC, latest_report.id DESC
+    LIMIT 1
+  ), 'not_started') = $${params.length}`)
+}
+
 function appendSubmissionDetailFilters(
   where: string[],
   params: unknown[],
   filters: SubmissionDetailListFilters,
 ) {
+  appendLatestReportStatusFilter(where, params, filters.reportStatus)
+
   if (filters.status) {
     params.push(filters.status)
     where.push('s.submission_status = $' + params.length)
@@ -672,6 +695,8 @@ export class PgAdminRepository {
       params.push(filters.status)
       where.push('s.submission_status = $' + params.length)
     }
+
+    appendLatestReportStatusFilter(where, params, filters.reportStatus)
 
     if (filters.roundtableRegistered !== null) {
       params.push(filters.roundtableRegistered)
