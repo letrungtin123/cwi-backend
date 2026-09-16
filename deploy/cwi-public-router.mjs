@@ -54,6 +54,15 @@ function resolveStaticPath(root, strippedPath) {
   return requested
 }
 
+function decodeStaticPath(value) {
+  try {
+    const decoded = decodeURIComponent(value)
+    return decoded.includes('\0') ? null : decoded
+  } catch {
+    return null
+  }
+}
+
 async function proxyApi(req, res) {
   const target = new URL(req.url ?? '/', apiBaseUrl)
   const headers = new Headers(req.headers)
@@ -87,7 +96,10 @@ async function proxyApi(req, res) {
 }
 
 async function serveApp(req, res, root, strippedPath) {
-  const requested = resolveStaticPath(root, strippedPath)
+  const decodedPath = decodeStaticPath(strippedPath)
+  if (decodedPath === null) return sendError(res, 400, 'Invalid URL path')
+
+  const requested = resolveStaticPath(root, decodedPath)
   if (!requested) return sendError(res, 403, 'Forbidden')
 
   let filePath = requested
