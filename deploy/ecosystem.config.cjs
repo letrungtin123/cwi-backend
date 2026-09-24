@@ -62,7 +62,7 @@ module.exports = {
       args:
         '--landing-root ' + path.join(platformRoot, 'source4', 'dist') +
         ' --dashboard-root ' + path.join(platformRoot, 'cwi-dashboard', 'dist') +
-        ' --port 8080 --host 0.0.0.0 --api http://127.0.0.1:8088',
+        ' --port 8180 --host 127.0.0.1 --api http://127.0.0.1:8088',
       env: { NODE_ENV: nodeEnv },
       env_production: { NODE_ENV: 'production' },
       autorestart: true,

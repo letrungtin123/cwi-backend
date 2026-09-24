@@ -61,8 +61,16 @@ pm2 status
 pm2 logs cwi-backend --lines 100
 curl --fail-with-body -sS http://127.0.0.1:8088/healthz
 curl --fail-with-body -sS http://127.0.0.1:8088/readyz
-curl --fail-with-body -sS http://127.0.0.1:8080/ > /dev/null
-curl --fail-with-body -sS http://127.0.0.1:8080/dashboard/ > /dev/null
+curl --fail-with-body -sS http://127.0.0.1:8180/ > /dev/null
+curl --fail-with-body -sS http://127.0.0.1:8180/dashboard/ > /dev/null
 ```
+
+## Public ingress
+
+`cwi-public` is private on `127.0.0.1:8180`. Production Nginx is the only
+public ingress and proxies to that port. The versioned Nginx and firewall files
+under `deploy/nginx/` must be installed by an administrator before changing
+Cloudflare's SSL mode to **Full (strict)**. Do not expose port `8180`, `8088`,
+or the Docker service ports to the Internet.
 
 Nếu có lỗi, xem `pm2 status` và log PM2 trước khi retry. Không xoá release đang active hoặc dữ liệu ứng dụng thủ công.

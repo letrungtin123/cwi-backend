@@ -1,0 +1,12 @@
+[Unit]
+Description=CWI production ingress firewall
+After=network-online.target docker.service nginx.service
+Wants=network-online.target nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/cwi-harden-production-ingress
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

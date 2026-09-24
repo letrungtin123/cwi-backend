@@ -193,7 +193,7 @@ pm2 delete cwi-backend cwi-export-worker cwi-public cwi-report-generation-worker
 start_release "$release_dir"
 pm2 save >/dev/null
 
-if ! wait_for_url 'http://127.0.0.1:8088/healthz' 30 || ! wait_for_url 'http://127.0.0.1:8088/readyz' 30 || ! wait_for_url 'http://127.0.0.1:8080/' 30 || ! wait_for_url 'http://127.0.0.1:8080/dashboard/' 30; then
+if ! wait_for_url 'http://127.0.0.1:8088/healthz' 30 || ! wait_for_url 'http://127.0.0.1:8088/readyz' 30 || ! wait_for_url 'http://127.0.0.1:8180/' 30 || ! wait_for_url 'http://127.0.0.1:8180/dashboard/' 30; then
   fail 'Production health check failed; rollback was attempted.'
 fi
 
