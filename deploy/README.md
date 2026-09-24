@@ -73,4 +73,8 @@ under `deploy/nginx/` must be installed by an administrator before changing
 Cloudflare's SSL mode to **Full (strict)**. Do not expose port `8180`, `8088`,
 or the Docker service ports to the Internet.
 
+When Certbot is used with the webroot authenticator, install
+`certbot-reload-nginx.sh` as a Certbot deploy hook so Nginx reloads each renewed
+certificate automatically.
+
 Nếu có lỗi, xem `pm2 status` và log PM2 trước khi retry. Không xoá release đang active hoặc dữ liệu ứng dụng thủ công.
