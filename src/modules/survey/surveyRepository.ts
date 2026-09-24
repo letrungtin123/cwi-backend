@@ -9,6 +9,11 @@ import {
   lockRoundtableEmail,
   syncSurveyRoundtableFlags,
 } from '../roundtable/roundtableLinking.js'
+import {
+  findWebinarByEmail,
+  linkWebinarIfUnlinked,
+  lockWebinarEmail,
+} from '../webinar/webinarLinking.js'
 import type { ReportJobCreateInput } from '../reports/reportPayload.js'
 import type { NormalizedAnswer, NormalizedSurveySubmission } from './submissionValidation.js'
 
@@ -124,6 +129,8 @@ export class PgSurveyRepository implements SurveyRepository {
 
       // Survey submissions may repeat, but Roundtable registration is canonical by email.
       await lockRoundtableEmail(client, input.participant.email)
+      // Keep the lock order stable for concurrent survey and Webinar registrations.
+      await lockWebinarEmail(client, input.participant.email)
 
       const inserted = await client.query<InsertedSubmissionRow>(
         `
@@ -245,6 +252,11 @@ export class PgSurveyRepository implements SurveyRepository {
           ],
         )
         await syncSurveyRoundtableFlags(client, input.participant.email)
+      }
+
+      const existingWebinar = await findWebinarByEmail(client, input.participant.email)
+      if (existingWebinar) {
+        await linkWebinarIfUnlinked(client, existingWebinar, submission.id)
       }
 
       if (reportJob) {

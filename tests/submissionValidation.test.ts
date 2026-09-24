@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { HttpError } from '../src/http/errors.js'
 import { buildAnonymousReportPayload } from '../src/modules/reports/anonymousReportPayload.js'
 import { normalizeRoundtableEmailCheck, normalizeRoundtableRegistration } from '../src/modules/roundtable/roundtableValidation.js'
+import { normalizeWebinarEmailCheck, normalizeWebinarRegistration } from '../src/modules/webinar/webinarValidation.js'
 import { buildReportObjectPaths } from '../src/modules/reports/reportAssetStorage.js'
 import { buildReportJobRequest } from '../src/modules/reports/reportPayload.js'
 import { normalizeSurveySubmission } from '../src/modules/survey/submissionValidation.js'
@@ -212,6 +213,32 @@ describe('normalizeRoundtableRegistration', () => {
     expect(registration.email).toBe('ceo@company.com')
     expect(registration.fullName).toBe('Nguyễn Văn An')
     expect(registration.idempotencyKey).toBe('roundtable-key-1')
+    expect(registration.position).toBe('CEO / Tổng Giám đốc')
+    expect(registration.surveySubmissionIdempotencyKey).toBe('source4:survey-key-1')
+    expect(registration.payloadHash).toMatch(/^[a-f0-9]{64}$/)
+  })
+})
+
+describe('normalizeWebinarRegistration', () => {
+  it('normalizes email-only status checks', () => {
+    expect(normalizeWebinarEmailCheck({ email: '  WEBINAR@Company.com ' })).toEqual({ email: 'webinar@company.com' })
+  })
+
+  it('normalizes standalone webinar registration payloads', () => {
+    const registration = normalizeWebinarRegistration(
+      {
+        clientMeta: { path: '/' },
+        email: 'WEBINAR@Company.com',
+        fullName: '  Nguyễn   Văn An  ',
+        position: ' CEO / Tổng Giám đốc ',
+        surveySubmissionIdempotencyKey: 'source4:survey-key-1',
+      },
+      'webinar-key-1',
+    )
+
+    expect(registration.email).toBe('webinar@company.com')
+    expect(registration.fullName).toBe('Nguyễn Văn An')
+    expect(registration.idempotencyKey).toBe('webinar-key-1')
     expect(registration.position).toBe('CEO / Tổng Giám đốc')
     expect(registration.surveySubmissionIdempotencyKey).toBe('source4:survey-key-1')
     expect(registration.payloadHash).toMatch(/^[a-f0-9]{64}$/)

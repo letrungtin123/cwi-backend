@@ -23,6 +23,7 @@ Health:
 Public:
 - `POST /api/v1/survey-submissions`
 - `POST /api/v1/roundtable-registrations`
+- `POST /api/v1/webinar-registrations`
 - `GET /api/v1/public/report-jobs/:id/status` (requires the per-report `X-CWI-Report-Token` header)
 - `GET /api/v1/public/report-jobs/:id/html` (requires the per-report `X-CWI-Report-Token` header)
 
@@ -38,6 +39,9 @@ Admin dashboard API:
 - `GET /api/v1/admin/roundtable-registrations/page`
 - `GET /api/v1/admin/roundtable-registrations/stats`
 - `GET /api/v1/admin/roundtable-registrations/:id`
+- `GET /api/v1/admin/webinar-registrations/page`
+- `GET /api/v1/admin/webinar-registrations/stats`
+- `GET /api/v1/admin/webinar-registrations/:id`
 - `GET /api/v1/admin/report-jobs/:id/pdf`
 
 Admin list endpoints default to `limit=10` and accept a signed opaque `cursor`. The legacy `before`/`beforeId` pair remains supported during client migration. `limit` must be an integer from 1 to 100; invalid values return `400`.

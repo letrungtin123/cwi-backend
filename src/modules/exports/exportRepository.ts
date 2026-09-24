@@ -50,6 +50,8 @@ type RoundtableExportRow = {
   registered_at: Date
 }
 
+type EventRegistrationTable = 'cwi_roundtable_registrations' | 'cwi_webinar_registrations'
+
 export type ExportCursor = {
   id: string
   timestamp: Date
@@ -97,7 +99,11 @@ export class PgExportRepository {
     )
     if (active.rows[0]) return mapRow(active.rows[0])
 
-    const fileName = input.dataset === 'submissions' ? 'du-lieu-khao-sat.xlsx' : 'du-lieu-roundtable.xlsx'
+    const fileName = input.dataset === 'submissions'
+      ? 'du-lieu-khao-sat.xlsx'
+      : input.dataset === 'roundtable'
+        ? 'du-lieu-roundtable.xlsx'
+        : 'du-lieu-webinar.xlsx'
     try {
       const result = await this.pool.query<ExportJobRow>(
         [
@@ -279,6 +285,25 @@ export class PgExportRepository {
     cursor: ExportCursor | null,
     batchSize: number,
   ): Promise<ExportBatch<RoundtableExportRow>> {
+    return this.listEventRegistrationBatch('cwi_roundtable_registrations', filters, snapshotAt, cursor, batchSize)
+  }
+
+  async listWebinarBatch(
+    filters: ExportFilters,
+    snapshotAt: Date,
+    cursor: ExportCursor | null,
+    batchSize: number,
+  ): Promise<ExportBatch<RoundtableExportRow>> {
+    return this.listEventRegistrationBatch('cwi_webinar_registrations', filters, snapshotAt, cursor, batchSize)
+  }
+
+  private async listEventRegistrationBatch(
+    table: EventRegistrationTable,
+    filters: ExportFilters,
+    snapshotAt: Date,
+    cursor: ExportCursor | null,
+    batchSize: number,
+  ): Promise<ExportBatch<RoundtableExportRow>> {
     const params: unknown[] = [snapshotAt]
     const where = ['r.registered_at <= $1']
     if (cursor) {
@@ -300,7 +325,7 @@ export class PgExportRepository {
         '       s.status_note AS linked_status_note, s.privacy_consent AS linked_privacy_consent,',
         '       s.answers_count AS linked_answers_count, s.submitted_at AS linked_submitted_at,',
         '       report.status AS linked_report_status',
-        'FROM public.cwi_roundtable_registrations AS r',
+        'FROM public.' + table + ' AS r',
         'LEFT JOIN public.cwi_survey_submissions AS s ON s.id = r.submission_id',
         'LEFT JOIN LATERAL (',
         '  SELECT status FROM public.cwi_report_jobs',

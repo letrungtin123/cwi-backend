@@ -14,6 +14,8 @@ import { PgRoundtableRepository } from './modules/roundtable/roundtableRepositor
 import { RoundtableService } from './modules/roundtable/roundtableService.js'
 import { PgSurveyRepository } from './modules/survey/surveyRepository.js'
 import { SurveyService } from './modules/survey/surveyService.js'
+import { PgWebinarRepository } from './modules/webinar/webinarRepository.js'
+import { WebinarService } from './modules/webinar/webinarService.js'
 import { PgReportDeliveryRepository } from './modules/reportDelivery/reportDeliveryRepository.js'
 import { SmtpReportMailer } from './modules/reportDelivery/smtpMailer.js'
 
@@ -59,6 +61,7 @@ const config: RuntimeConfig = {
 
 const surveyRepository = new PgSurveyRepository(pool)
 const roundtableRepository = new PgRoundtableRepository(pool)
+const webinarRepository = new PgWebinarRepository(pool)
 const adminRepository = new PgAdminRepository(pool, config.adminCursorSecret)
 const exportRepository = new PgExportRepository(pool)
 const reportRepository = new PgReportRepository(pool)
@@ -103,7 +106,8 @@ const reportMailer = new SmtpReportMailer({
 const reportAccessTokenService = new ReportAccessTokenService(config.reportPublicTokenSecret, config.reportPublicTokenTtlSeconds)
 const surveyService = new SurveyService(surveyRepository, { reportAccessTokenService, reportServiceEnabled: env.reportServiceEnabled })
 const roundtableService = new RoundtableService(roundtableRepository)
-const app = createApp({ adminRepository, authService, config, exportRepository, logger, pool, reportAccessTokenService, reportAssetStorage, submissionReportStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, surveyService })
+const webinarService = new WebinarService(webinarRepository)
+const app = createApp({ adminRepository, authService, config, exportRepository, logger, pool, reportAccessTokenService, reportAssetStorage, submissionReportStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, surveyService, webinarService })
 
 const server = app.listen(env.port, env.host, () => {
   logger.info({

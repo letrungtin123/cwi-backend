@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const exportDatasetSchema = z.enum(['submissions', 'roundtable'])
+export const exportDatasetSchema = z.enum(['submissions', 'roundtable', 'webinar'])
 
 export const exportFiltersSchema = z
   .object({

@@ -186,6 +186,13 @@ export type RoundtableRegistrationStats = {
   totalRegistrations: number
 }
 
+export type WebinarLinkStatus = RoundtableLinkStatus
+export type WebinarSubmissionSummary = RoundtableSubmissionSummary
+export type WebinarRegistrationListItem = RoundtableRegistrationListItem
+export type WebinarRegistrationDetail = RoundtableRegistrationDetail
+export type WebinarRegistrationFilters = RoundtableRegistrationFilters
+export type WebinarRegistrationStats = RoundtableRegistrationStats
+
 type StatsRow = {
   full_private_report: string
   part1_only: string
@@ -304,6 +311,8 @@ const roundtableSelect = `
     LIMIT 1
   ) AS report ON true
 `
+
+const webinarSelect = roundtableSelect.replace('public.cwi_roundtable_registrations', 'public.cwi_webinar_registrations')
 
 function toIso(value: Date) {
   return value.toISOString()
@@ -566,6 +575,7 @@ function appendSubmissionDetailFilters(
 
 export class PgAdminRepository {
   private roundtableStatsCache: TimedCache<RoundtableRegistrationStats> | null = null
+  private webinarStatsCache: TimedCache<WebinarRegistrationStats> | null = null
   private submissionStatsCache: TimedCache<SubmissionStats> | null = null
 
   constructor(
@@ -675,6 +685,109 @@ export class PgAdminRepository {
     const row = result.rows[0]
     if (!row) {
       throw new HttpError(404, 'roundtable_registration_not_found', 'Roundtable registration was not found.')
+    }
+
+    return mapRoundtableRegistrationDetail(row)
+  }
+
+  async listWebinarRegistrationsPage(filters: WebinarRegistrationFilters): Promise<CursorPage<WebinarRegistrationListItem>> {
+    const params: unknown[] = []
+    const where: string[] = []
+
+    if (filters.before) {
+      params.push(filters.before)
+      const beforeParam = params.length
+
+      if (filters.beforeId) {
+        params.push(filters.beforeId)
+        const beforeIdParam = params.length
+        where.push('(r.registered_at, r.id) < ($' + beforeParam + '::timestamptz, $' + beforeIdParam + '::uuid)')
+      } else {
+        where.push('r.registered_at < $' + beforeParam + '::timestamptz')
+      }
+    }
+
+    if (filters.linkStatus === 'linked') {
+      where.push('r.submission_id IS NOT NULL')
+    } else if (filters.linkStatus === 'standalone') {
+      where.push('r.submission_id IS NULL')
+    }
+
+    if (filters.search) {
+      params.push('%' + filters.search + '%')
+      where.push(
+        '(r.full_name ILIKE $' + params.length +
+          ' OR r.email ILIKE $' + params.length +
+          ' OR r.position ILIKE $' + params.length +
+          ' OR s.full_name ILIKE $' + params.length +
+          ' OR s.email ILIKE $' + params.length +
+          ' OR s.position ILIKE $' + params.length +
+          ' OR s.phone ILIKE $' + params.length + ')',
+      )
+    }
+
+    params.push(filters.limit + 1)
+    const query = [
+      webinarSelect,
+      where.length ? 'WHERE ' + where.join(' AND ') : '',
+      'ORDER BY r.registered_at DESC, r.id DESC',
+      'LIMIT $' + params.length,
+    ].join('\n')
+    const result = await this.pool.query<RoundtableRegistrationRow>(query, params)
+    const hasNextPage = result.rows.length > filters.limit
+    const rows = result.rows.slice(0, filters.limit)
+    const lastRow = rows.at(-1)
+
+    return {
+      hasNextPage,
+      items: rows.map(mapRoundtableRegistration),
+      nextCursor: hasNextPage && lastRow ? this.nextCursor(lastRow.registered_at, lastRow.id) : null,
+    }
+  }
+
+  async listWebinarRegistrations(filters: WebinarRegistrationFilters): Promise<WebinarRegistrationListItem[]> {
+    const page = await this.listWebinarRegistrationsPage(filters)
+    return page.items
+  }
+
+  async getWebinarRegistrationStats(): Promise<WebinarRegistrationStats> {
+    if (this.webinarStatsCache && this.webinarStatsCache.expiresAt > Date.now()) return this.webinarStatsCache.value
+
+    const result = await this.pool.query<RoundtableStatsRow>(
+      `
+      SELECT
+        count(*)::text AS total_registrations,
+        count(*) FILTER (WHERE submission_id IS NOT NULL)::text AS linked_submissions,
+        count(*) FILTER (WHERE submission_id IS NULL)::text AS standalone_registrations,
+        count(*) FILTER (WHERE registered_at >= date_trunc('day', now()))::text AS today_registrations
+      FROM public.cwi_webinar_registrations
+      `,
+    )
+
+    const row = result.rows[0]
+    const value = {
+      linkedSubmissions: toNumber(row?.linked_submissions ?? null),
+      standaloneRegistrations: toNumber(row?.standalone_registrations ?? null),
+      todayRegistrations: toNumber(row?.today_registrations ?? null),
+      totalRegistrations: toNumber(row?.total_registrations ?? null),
+    }
+    this.webinarStatsCache = { expiresAt: Date.now() + statsCacheTtlMs, value }
+    return value
+  }
+
+  async getWebinarRegistration(id: string): Promise<WebinarRegistrationDetail> {
+    const result = await this.pool.query<RoundtableRegistrationRow>(
+      `
+      ${webinarSelect}
+      WHERE r.id = $1
+      LIMIT 1
+      `,
+      [id],
+    )
+
+    const row = result.rows[0]
+    if (!row) {
+      throw new HttpError(404, 'webinar_registration_not_found', 'Webinar registration was not found.')
     }
 
     return mapRoundtableRegistrationDetail(row)

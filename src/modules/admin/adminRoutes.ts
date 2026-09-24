@@ -193,6 +193,54 @@ export function createAdminRouter(
     }
   })
 
+  router.get('/webinar-registrations/stats', async (_req, res, next) => {
+    try {
+      const data = await repository.getWebinarRegistrationStats()
+      res.json({ data })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  router.get('/webinar-registrations/page', async (req, res, next) => {
+    try {
+      const cursor = parsePaginationCursor(req.query.cursor, req.query.before, req.query.beforeId, config.adminCursorSecret)
+      const data = await repository.listWebinarRegistrationsPage({
+        ...cursor,
+        limit: parseLimit(req.query.limit),
+        linkStatus: parseRoundtableLinkStatus(req.query.linkStatus),
+        search: parseSearch(req.query.search),
+      })
+      res.json({ data })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  router.get('/webinar-registrations', async (req, res, next) => {
+    try {
+      const data = await repository.listWebinarRegistrations({
+        ...parsePaginationCursor(req.query.cursor, req.query.before, req.query.beforeId, config.adminCursorSecret),
+        limit: parseLimit(req.query.limit),
+        linkStatus: parseRoundtableLinkStatus(req.query.linkStatus),
+        search: parseSearch(req.query.search),
+      })
+      res.json({ data })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  router.get('/webinar-registrations/:id', async (req, res, next) => {
+    try {
+      const id = assertUuid(req.params.id, 'invalid_webinar_registration_id', 'Webinar registration id must be a UUID.')
+      const data = await repository.getWebinarRegistration(id)
+      res.json({ data })
+    } catch (error) {
+      next(error)
+    }
+  })
+
   router.get('/survey-submissions/stats', async (_req, res, next) => {
     try {
       const data = await repository.getSubmissionStats()

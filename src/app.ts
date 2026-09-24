@@ -26,6 +26,8 @@ import { createRoundtableRouter } from './modules/roundtable/roundtableRoutes.js
 import type { RoundtableService } from './modules/roundtable/roundtableService.js'
 import { createSurveyRouter } from './modules/survey/surveyRoutes.js'
 import type { SurveyService } from './modules/survey/surveyService.js'
+import { createWebinarRouter } from './modules/webinar/webinarRoutes.js'
+import type { WebinarService } from './modules/webinar/webinarService.js'
 
 export type AppDependencies = {
   adminRepository: PgAdminRepository
@@ -42,6 +44,7 @@ export type AppDependencies = {
   reportRepository: PgReportRepository
   roundtableService: RoundtableService
   surveyService: SurveyService
+  webinarService: WebinarService
 }
 
 function isAllowedDevOrigin(origin: string) {
@@ -106,7 +109,7 @@ function noStore(res: Response) {
 }
 
 export function createApp(dependencies: AppDependencies) {
-  const { adminRepository, authService, config, exportRepository, logger, pool, reportAccessTokenService, reportAssetStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, submissionReportStorage, surveyService } = dependencies
+  const { adminRepository, authService, config, exportRepository, logger, pool, reportAccessTokenService, reportAssetStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, submissionReportStorage, surveyService, webinarService } = dependencies
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', config.trustProxy)
@@ -147,6 +150,7 @@ export function createApp(dependencies: AppDependencies) {
 
   app.use('/api/v1/auth', createAuthRouter(authService, config))
   app.use('/api/v1/roundtable-registrations', createRoundtableRouter(roundtableService, config))
+  app.use('/api/v1/webinar-registrations', createWebinarRouter(webinarService, config))
   app.use('/api/v1/survey-submissions', createSurveyRouter(surveyService, config))
   app.use('/api/v1/public', createPublicReportRouter(reportRepository, reportAssetStorage, reportAccessTokenService))
   app.use('/api/v1/admin', createAdminRouter(adminRepository, reportRepository, reportAssetStorage, exportRepository, authService, config))
