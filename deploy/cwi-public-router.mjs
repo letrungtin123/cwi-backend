@@ -65,6 +65,25 @@ function decodeStaticPath(value) {
   }
 }
 
+function parseByteRange(header, fileSize) {
+  if (!header) return null
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim())
+  if (!match) return 'invalid'
+
+  const [, rawStart, rawEnd] = match
+  if (!rawStart && !rawEnd) return 'invalid'
+  if (!rawStart) {
+    const suffixLength = Number(rawEnd)
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return 'invalid'
+    return { end: fileSize - 1, start: Math.max(0, fileSize - suffixLength) }
+  }
+
+  const start = Number(rawStart)
+  const end = rawEnd ? Number(rawEnd) : fileSize - 1
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= fileSize) return 'invalid'
+  return { end: Math.min(end, fileSize - 1), start }
+}
+
 async function proxyApi(req, res) {
   const target = new URL(req.url ?? '/', apiBaseUrl)
   const headers = new Headers(req.headers)
@@ -117,13 +136,34 @@ async function serveApp(req, res, root, strippedPath) {
 
   const ext = path.extname(filePath).toLowerCase()
   const isAsset = filePath.includes(`${path.sep}assets${path.sep}`)
-  res.writeHead(200, {
+  const headers = {
+    'accept-ranges': 'bytes',
     'cache-control': isAsset ? 'public, max-age=31536000, immutable' : 'no-cache',
-    'content-length': String(fileStat.size),
     'content-type': mimeTypes.get(ext) ?? 'application/octet-stream',
     'x-content-type-options': 'nosniff',
-  })
-  createReadStream(filePath).pipe(res)
+  }
+  const byteRange = parseByteRange(req.headers.range, fileStat.size)
+  if (byteRange === 'invalid') {
+    res.writeHead(416, { ...headers, 'content-range': `bytes */${fileStat.size}` })
+    res.end()
+    return
+  }
+
+  if (byteRange) {
+    const contentLength = byteRange.end - byteRange.start + 1
+    res.writeHead(206, {
+      ...headers,
+      'content-length': String(contentLength),
+      'content-range': `bytes ${byteRange.start}-${byteRange.end}/${fileStat.size}`,
+    })
+    if (req.method !== 'HEAD') createReadStream(filePath, byteRange).pipe(res)
+    else res.end()
+    return
+  }
+
+  res.writeHead(200, { ...headers, 'content-length': String(fileStat.size) })
+  if (req.method !== 'HEAD') createReadStream(filePath).pipe(res)
+  else res.end()
 }
 
 createServer(async (req, res) => {
