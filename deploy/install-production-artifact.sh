@@ -183,7 +183,7 @@ if ! wait_for_url "http://127.0.0.1:${staged_backend_port}/healthz" 30 || ! wait
   fail 'Staged backend health check failed.'
 fi
 start_smoke_public
-if ! wait_for_url "http://127.0.0.1:${staged_public_port}/" 30 || ! wait_for_url "http://127.0.0.1:${staged_public_port}/dashboard/" 30; then
+if ! wait_for_url "http://127.0.0.1:${staged_public_port}/" 30 || ! wait_for_url "http://127.0.0.1:${staged_public_port}/dashboard/" 30 || ! wait_for_url "http://127.0.0.1:${staged_public_port}/bao-cao-quy/q3-2026" 30; then
   fail 'Staged frontend health check failed.'
 fi
 stop_smoke_processes
@@ -193,7 +193,7 @@ pm2 delete cwi-backend cwi-export-worker cwi-public cwi-report-generation-worker
 start_release "$release_dir"
 pm2 save >/dev/null
 
-if ! wait_for_url 'http://127.0.0.1:8088/healthz' 30 || ! wait_for_url 'http://127.0.0.1:8088/readyz' 30 || ! wait_for_url 'http://127.0.0.1:8180/' 30 || ! wait_for_url 'http://127.0.0.1:8180/dashboard/' 30; then
+if ! wait_for_url 'http://127.0.0.1:8088/healthz' 30 || ! wait_for_url 'http://127.0.0.1:8088/readyz' 30 || ! wait_for_url 'http://127.0.0.1:8180/' 30 || ! wait_for_url 'http://127.0.0.1:8180/dashboard/' 30 || ! wait_for_url 'http://127.0.0.1:8180/bao-cao-quy/q3-2026' 30; then
   fail 'Production health check failed; rollback was attempted.'
 fi
 

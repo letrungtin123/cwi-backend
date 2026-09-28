@@ -1,3 +1,4 @@
+import rateLimit from 'express-rate-limit'
 import type { NextFunction, Request, Response } from 'express'
 import type { RuntimeConfig } from '../config/runtime.js'
 import { HttpError } from './errors.js'
@@ -34,6 +35,16 @@ export function requireAdminSession(authService: AuthService, config: RuntimeCon
       next(error)
     }
   }
+}
+
+export function createAdminRequestRateLimit(config: RuntimeConfig) {
+  return rateLimit({
+    keyGenerator: (req) => getRequiredAdminSession(req).id,
+    legacyHeaders: false,
+    limit: config.adminRateLimitMax,
+    standardHeaders: 'draft-7',
+    windowMs: config.adminRateLimitWindowMs,
+  })
 }
 
 export function getRequiredAdminSession(req: Request) {

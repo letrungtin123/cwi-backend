@@ -24,6 +24,11 @@ Public:
 - `POST /api/v1/survey-submissions`
 - `POST /api/v1/roundtable-registrations`
 - `POST /api/v1/webinar-registrations`
+- `GET /api/v1/public/quarterly-reports/active`
+- `GET /api/v1/public/quarterly-reports/:slug`
+- `GET /api/v1/public/quarterly-reports/:slug/pdf` (backend stream từ private Storage; hỗ trợ HTTP Range cho PDF.js)
+- `POST /api/v1/public/quarterly-reports/:slug/downloads` (ghi nhận lead đã consent, trả link tải có chữ ký ngắn hạn)
+- `GET /api/v1/public/quarterly-reports/:slug/download?token=...` (chỉ dùng từ link có chữ ký)
 - `GET /api/v1/public/report-jobs/:id/status` (requires the per-report `X-CWI-Report-Token` header)
 - `GET /api/v1/public/report-jobs/:id/html` (requires the per-report `X-CWI-Report-Token` header)
 
@@ -43,6 +48,10 @@ Admin dashboard API:
 - `GET /api/v1/admin/webinar-registrations/stats`
 - `GET /api/v1/admin/webinar-registrations/:id`
 - `GET /api/v1/admin/report-jobs/:id/pdf`
+- `GET /api/v1/admin/quarterly-reports/reports`
+- `POST /api/v1/admin/quarterly-reports/reports` (admin only, multipart PDF only)
+- `GET /api/v1/admin/quarterly-reports/downloads/page`
+- `GET /api/v1/admin/quarterly-reports/downloads/stats`
 
 Admin list endpoints default to `limit=10` and accept a signed opaque `cursor`. The legacy `before`/`beforeId` pair remains supported during client migration. `limit` must be an integer from 1 to 100; invalid values return `400`.
 
@@ -51,6 +60,22 @@ Admin list endpoints default to `limit=10` and accept a signed opaque `cursor`. 
 The submission list/detail response does not expose internal score columns, source, domain scores, or client metadata. PDF responses are authenticated streams from private storage and never expose absolute storage URLs.
 
 Dashboard login uses Supabase Auth password verification on the backend, then stores an internal admin session in `cwi_admin_sessions`. The browser receives an HttpOnly session cookie and a CSRF cookie/header pair. Admin endpoints do not expose database credentials, service-role keys, or API keys to the frontend.
+
+## Quarterly Reports
+
+Apply `D:\CWI\supabase-cwi\supabase\manual_sql\20260928_0000_add_quarterly_reports.sql` manually in the intended Supabase project before enabling this module. The SQL creates the private `cwi-quarterly-report-pdfs` bucket and the report/download tables; the application and deployment scripts never run it automatically.
+
+After confirming that SQL, add these server-only values to the production environment file and restart the backend:
+
+```text
+QUARTERLY_REPORTS_ENABLED=true
+QUARTERLY_REPORT_BUCKET=cwi-quarterly-report-pdfs
+QUARTERLY_REPORT_DOWNLOAD_TOKEN_SECRET=<at-least-32-random-characters>
+QUARTERLY_REPORT_DOWNLOAD_TOKEN_TTL_SECONDS=600
+QUARTERLY_REPORT_UPLOAD_MAX_BYTES=52428800
+```
+
+The public landing route is `/bao-cao-quy` for the active report and `/bao-cao-quy/q3-2026` for a stable campaign URL. Both paths are SPA-fallback routes in the public router, so reloading them stays on the report page. The PDF itself is viewable through the backend because it is public content; the gated download flow prevents direct Storage access and records a consented lead before issuing an attachment link.
 
 ## Admin Bootstrap
 

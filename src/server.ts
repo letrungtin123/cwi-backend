@@ -18,6 +18,8 @@ import { PgWebinarRepository } from './modules/webinar/webinarRepository.js'
 import { WebinarService } from './modules/webinar/webinarService.js'
 import { PgReportDeliveryRepository } from './modules/reportDelivery/reportDeliveryRepository.js'
 import { SmtpReportMailer } from './modules/reportDelivery/smtpMailer.js'
+import { QuarterlyReportDownloadTokenService } from './modules/quarterlyReports/quarterlyReportDownloadToken.js'
+import { PgQuarterlyReportRepository } from './modules/quarterlyReports/quarterlyReportRepository.js'
 
 const logger = createLogger(env.logLevel)
 const pool = createDbPool({
@@ -29,6 +31,8 @@ const pool = createDbPool({
 })
 
 const config: RuntimeConfig = {
+  adminRateLimitMax: env.adminRateLimitMax,
+  adminRateLimitWindowMs: env.adminRateLimitWindowMs,
   adminCursorSecret: env.adminCursorSecret,
   adminExportEnabled: env.adminExportEnabled,
   reportDeliveryEnabled: env.reportDeliveryEnabled,
@@ -38,6 +42,11 @@ const config: RuntimeConfig = {
   reportPublicTokenSecret: env.reportPublicTokenSecret,
   reportPublicTokenTtlSeconds: env.reportPublicTokenTtlSeconds,
   reportUploadMaxBytes: env.reportUploadMaxBytes,
+  quarterlyReportBucket: env.quarterlyReportBucket,
+  quarterlyReportDownloadTokenSecret: env.quarterlyReportDownloadTokenSecret,
+  quarterlyReportDownloadTokenTtlSeconds: env.quarterlyReportDownloadTokenTtlSeconds,
+  quarterlyReportUploadMaxBytes: env.quarterlyReportUploadMaxBytes,
+  quarterlyReportsEnabled: env.quarterlyReportsEnabled,
   auth: {
     cookieDomain: env.authCookieDomain,
     cookieSameSite: env.authCookieSameSite,
@@ -65,6 +74,7 @@ const webinarRepository = new PgWebinarRepository(pool)
 const adminRepository = new PgAdminRepository(pool, config.adminCursorSecret)
 const exportRepository = new PgExportRepository(pool)
 const reportRepository = new PgReportRepository(pool)
+const quarterlyReportRepository = new PgQuarterlyReportRepository(pool, config.adminCursorSecret)
 const authRepository = new PgAuthRepository(pool)
 const authService = new AuthService(authRepository, config.auth)
 const reportAssetStorage = new ReportAssetStorage({
@@ -75,6 +85,12 @@ const reportAssetStorage = new ReportAssetStorage({
 })
 const submissionReportStorage = new ReportAssetStorage({
   bucket: env.reportDeliveryBucket,
+  serviceRoleKey: env.supabaseServiceRoleKey,
+  storageUrl: env.supabaseStorageUrl,
+  timeoutMs: env.reportStorageUploadTimeoutMs,
+})
+const quarterlyReportStorage = new ReportAssetStorage({
+  bucket: env.quarterlyReportBucket,
   serviceRoleKey: env.supabaseServiceRoleKey,
   storageUrl: env.supabaseStorageUrl,
   timeoutMs: env.reportStorageUploadTimeoutMs,
@@ -104,10 +120,11 @@ const reportMailer = new SmtpReportMailer({
 })
 
 const reportAccessTokenService = new ReportAccessTokenService(config.reportPublicTokenSecret, config.reportPublicTokenTtlSeconds)
+const quarterlyReportDownloadTokenService = new QuarterlyReportDownloadTokenService(config.quarterlyReportDownloadTokenSecret, config.quarterlyReportDownloadTokenTtlSeconds)
 const surveyService = new SurveyService(surveyRepository, { reportAccessTokenService, reportServiceEnabled: env.reportServiceEnabled })
 const roundtableService = new RoundtableService(roundtableRepository)
 const webinarService = new WebinarService(webinarRepository)
-const app = createApp({ adminRepository, authService, config, exportRepository, logger, pool, reportAccessTokenService, reportAssetStorage, submissionReportStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, surveyService, webinarService })
+const app = createApp({ adminRepository, authService, config, exportRepository, logger, pool, quarterlyReportDownloadTokenService, quarterlyReportRepository, quarterlyReportStorage, reportAccessTokenService, reportAssetStorage, submissionReportStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, surveyService, webinarService })
 
 const server = app.listen(env.port, env.host, () => {
   logger.info({
@@ -115,6 +132,7 @@ const server = app.listen(env.port, env.host, () => {
     port: env.port,
     reportAutoEmailEnabled: env.reportAutoEmailEnabled,
     reportDeliveryEnabled: env.reportDeliveryEnabled,
+    quarterlyReportsEnabled: env.quarterlyReportsEnabled,
     reportServiceEnabled: env.reportServiceEnabled,
   }, 'CWI backend listening')
 })

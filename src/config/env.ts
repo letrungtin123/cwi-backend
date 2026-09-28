@@ -22,6 +22,8 @@ const envSchema = z
   .object({
     ADMIN_CURSOR_SECRET: z.string().optional(),
     ADMIN_EXPORT_ENABLED: booleanSchema.default(false),
+    ADMIN_RATE_LIMIT_MAX: z.coerce.number().int().min(60).max(10000).default(360),
+    ADMIN_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
     RABBITMQ_URL: z.string().url().optional(),
     AUTH_COOKIE_DOMAIN: z.string().optional(),
     AUTH_COOKIE_SAME_SITE: z.enum(['lax', 'none', 'strict']).default('lax'),
@@ -70,6 +72,11 @@ const envSchema = z
     REPORT_DELIVERY_CONCURRENCY: z.coerce.number().int().min(1).max(10).default(1),
     REPORT_DELIVERY_REQUEUE_DELAY_MS: z.coerce.number().int().min(1000).max(60000).default(5000),
     REPORT_UPLOAD_MAX_BYTES: z.coerce.number().int().min(1048576).max(52428800).default(52428800),
+    QUARTERLY_REPORTS_ENABLED: booleanSchema.default(false),
+    QUARTERLY_REPORT_BUCKET: bucketNameSchema.default('cwi-quarterly-report-pdfs'),
+    QUARTERLY_REPORT_DOWNLOAD_TOKEN_SECRET: z.string().trim().optional(),
+    QUARTERLY_REPORT_DOWNLOAD_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(600),
+    QUARTERLY_REPORT_UPLOAD_MAX_BYTES: z.coerce.number().int().min(1048576).max(52428800).default(52428800),
     MAIL_AUTH_MODE: z.enum(['basic', 'microsoft365-oauth2']).default('basic'),
     MAIL_M365_CLIENT_ID: z.string().trim().optional(),
     MAIL_M365_CLIENT_SECRET: z.string().optional(),
@@ -157,6 +164,14 @@ const envSchema = z
     if (value.REPORT_AUTO_EMAIL_ENABLED && (!value.REPORT_SERVICE_ENABLED || !value.REPORT_DELIVERY_ENABLED)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'REPORT_SERVICE_ENABLED and REPORT_DELIVERY_ENABLED are required when REPORT_AUTO_EMAIL_ENABLED is true', path: ['REPORT_AUTO_EMAIL_ENABLED'] })
     }
+    if (value.QUARTERLY_REPORTS_ENABLED) {
+      if (!value.SUPABASE_SERVICE_ROLE_KEY || value.SUPABASE_SERVICE_ROLE_KEY.length < 32) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SUPABASE_SERVICE_ROLE_KEY is required when QUARTERLY_REPORTS_ENABLED is true', path: ['SUPABASE_SERVICE_ROLE_KEY'] })
+      }
+      if (value.NODE_ENV === 'production' && (!value.QUARTERLY_REPORT_DOWNLOAD_TOKEN_SECRET || value.QUARTERLY_REPORT_DOWNLOAD_TOKEN_SECRET.length < 32)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'QUARTERLY_REPORT_DOWNLOAD_TOKEN_SECRET must be at least 32 characters in production when quarterly reports are enabled', path: ['QUARTERLY_REPORT_DOWNLOAD_TOKEN_SECRET'] })
+      }
+    }
     if (value.AUTH_COOKIE_SAME_SITE === 'none' && !value.AUTH_COOKIE_SECURE) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'AUTH_COOKIE_SECURE must be true when AUTH_COOKIE_SAME_SITE is none', path: ['AUTH_COOKIE_SECURE'] })
     }
@@ -175,6 +190,8 @@ function splitOrigins(value: string | undefined) {
 export const env = {
   adminCursorSecret: parsed.data.ADMIN_CURSOR_SECRET ?? parsed.data.IP_HASH_SECRET ?? 'development-only-admin-cursor-secret',
   adminExportEnabled: parsed.data.ADMIN_EXPORT_ENABLED,
+  adminRateLimitMax: parsed.data.ADMIN_RATE_LIMIT_MAX,
+  adminRateLimitWindowMs: parsed.data.ADMIN_RATE_LIMIT_WINDOW_MS,
   rabbitmqUrl: parsed.data.RABBITMQ_URL ?? '',
   authCookieDomain: parsed.data.AUTH_COOKIE_DOMAIN ?? null,
   authCookieSameSite: parsed.data.AUTH_COOKIE_SAME_SITE,
@@ -217,6 +234,11 @@ export const env = {
   reportDeliveryConcurrency: parsed.data.REPORT_DELIVERY_CONCURRENCY,
   reportDeliveryRequeueDelayMs: parsed.data.REPORT_DELIVERY_REQUEUE_DELAY_MS,
   reportUploadMaxBytes: parsed.data.REPORT_UPLOAD_MAX_BYTES,
+  quarterlyReportBucket: parsed.data.QUARTERLY_REPORT_BUCKET,
+  quarterlyReportDownloadTokenSecret: parsed.data.QUARTERLY_REPORT_DOWNLOAD_TOKEN_SECRET ?? parsed.data.IP_HASH_SECRET ?? 'development-only-quarterly-report-token-secret',
+  quarterlyReportDownloadTokenTtlSeconds: parsed.data.QUARTERLY_REPORT_DOWNLOAD_TOKEN_TTL_SECONDS,
+  quarterlyReportUploadMaxBytes: parsed.data.QUARTERLY_REPORT_UPLOAD_MAX_BYTES,
+  quarterlyReportsEnabled: parsed.data.QUARTERLY_REPORTS_ENABLED,
   mailAuthMode: parsed.data.MAIL_AUTH_MODE,
   mailM365ClientId: parsed.data.MAIL_M365_CLIENT_ID ?? '',
   mailM365ClientSecret: parsed.data.MAIL_M365_CLIENT_SECRET ?? '',

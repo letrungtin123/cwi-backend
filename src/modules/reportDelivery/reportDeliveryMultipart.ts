@@ -20,6 +20,7 @@ export type ParsedPdfUpload = {
   fileName: string
   filePath: string
   fileSize: number
+  fields: Record<string, string>
   sha256: string
 }
 
@@ -27,7 +28,7 @@ function sanitizeFileName(value: string) {
   return normalizeReportFileName(value)
 }
 
-export async function parsePdfUpload(request: Request, maxBytes: number): Promise<ParsedPdfUpload> {
+export async function parsePdfUpload(request: Request, maxBytes: number, allowedFieldNames: readonly string[] = []): Promise<ParsedPdfUpload> {
   const contentType = request.headers['content-type'] ?? ''
   if (!contentType.toLowerCase().startsWith('multipart/form-data')) {
     throw new MultipartUploadError('Vui lòng tải lên file PDF theo định dạng multipart/form-data.')
@@ -41,6 +42,7 @@ export async function parsePdfUpload(request: Request, maxBytes: number): Promis
   let fileTooLarge = false
   let fileError: Error | null = null
   let writePromise: Promise<void> | null = null
+  const fields: Record<string, string> = {}
   let prefix = Buffer.alloc(0)
   const hash = createHash('sha256')
 
@@ -51,7 +53,7 @@ export async function parsePdfUpload(request: Request, maxBytes: number): Promis
         parser = Busboy({
           defParamCharset: 'utf8',
           headers: request.headers,
-          limits: { files: 1, fileSize: maxBytes, fields: 2 },
+          limits: { files: 1, fileSize: maxBytes, fields: Math.max(2, allowedFieldNames.length + 1) },
         })
       } catch {
         reject(new MultipartUploadError('Dữ liệu tải lên không hợp lệ.'))
@@ -81,6 +83,14 @@ export async function parsePdfUpload(request: Request, maxBytes: number): Promis
         writePromise = pipeline(stream, output).catch((error) => { fileError = error })
       })
 
+      parser.on('field', (fieldName, value) => {
+        if (!allowedFieldNames.includes(fieldName) || Object.prototype.hasOwnProperty.call(fields, fieldName)) {
+          fileError = new MultipartUploadError('Dữ liệu tải lên không hợp lệ.')
+          return
+        }
+        fields[fieldName] = value
+      })
+
       parser.on('filesLimit', () => { fileTooLarge = true })
       parser.on('error', reject)
       parser.on('finish', resolve)
@@ -94,7 +104,7 @@ export async function parsePdfUpload(request: Request, maxBytes: number): Promis
     if (prefix.toString('ascii') !== '%PDF-') throw new MultipartUploadError('File tải lên không phải PDF hợp lệ.')
     if (fileSize <= 0) throw new MultipartUploadError('File PDF không được để trống.')
 
-    return { fileName, filePath: temporaryPath, fileSize, sha256: hash.digest('hex') }
+    return { fileName, filePath: temporaryPath, fileSize, fields, sha256: hash.digest('hex') }
   } catch (error) {
     await rm(temporaryDirectory, { force: true, recursive: true })
     if (error instanceof MultipartUploadError) throw error

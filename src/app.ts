@@ -28,6 +28,9 @@ import { createSurveyRouter } from './modules/survey/surveyRoutes.js'
 import type { SurveyService } from './modules/survey/surveyService.js'
 import { createWebinarRouter } from './modules/webinar/webinarRoutes.js'
 import type { WebinarService } from './modules/webinar/webinarService.js'
+import { createQuarterlyReportAdminRouter, createQuarterlyReportPublicRouter } from './modules/quarterlyReports/quarterlyReportRoutes.js'
+import type { QuarterlyReportDownloadTokenService } from './modules/quarterlyReports/quarterlyReportDownloadToken.js'
+import type { PgQuarterlyReportRepository } from './modules/quarterlyReports/quarterlyReportRepository.js'
 
 export type AppDependencies = {
   adminRepository: PgAdminRepository
@@ -42,6 +45,9 @@ export type AppDependencies = {
   reportDeliveryRepository: PgReportDeliveryRepository
   reportMailer: SmtpReportMailer
   reportRepository: PgReportRepository
+  quarterlyReportDownloadTokenService: QuarterlyReportDownloadTokenService
+  quarterlyReportRepository: PgQuarterlyReportRepository
+  quarterlyReportStorage: ReportAssetStorage
   roundtableService: RoundtableService
   surveyService: SurveyService
   webinarService: WebinarService
@@ -109,7 +115,7 @@ function noStore(res: Response) {
 }
 
 export function createApp(dependencies: AppDependencies) {
-  const { adminRepository, authService, config, exportRepository, logger, pool, reportAccessTokenService, reportAssetStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, submissionReportStorage, surveyService, webinarService } = dependencies
+  const { adminRepository, authService, config, exportRepository, logger, pool, quarterlyReportDownloadTokenService, quarterlyReportRepository, quarterlyReportStorage, reportAccessTokenService, reportAssetStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, submissionReportStorage, surveyService, webinarService } = dependencies
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', config.trustProxy)
@@ -129,7 +135,13 @@ export function createApp(dependencies: AppDependencies) {
   app.use(helmet())
   app.use(compression())
   app.use(cors(createCorsOptions(config)))
-  app.use(rateLimit({ legacyHeaders: false, limit: config.rateLimitMax, standardHeaders: 'draft-7', windowMs: config.rateLimitWindowMs }))
+  app.use(rateLimit({
+    legacyHeaders: false,
+    limit: config.rateLimitMax,
+    skip: (req) => req.path === '/api/v1/auth/me' || req.path.startsWith('/api/v1/admin/'),
+    standardHeaders: 'draft-7',
+    windowMs: config.rateLimitWindowMs,
+  }))
   app.use(express.json({ limit: config.requestBodyLimit }))
 
   const liveness = (_req: Request, res: Response) => {
@@ -152,9 +164,11 @@ export function createApp(dependencies: AppDependencies) {
   app.use('/api/v1/roundtable-registrations', createRoundtableRouter(roundtableService, config))
   app.use('/api/v1/webinar-registrations', createWebinarRouter(webinarService, config))
   app.use('/api/v1/survey-submissions', createSurveyRouter(surveyService, config))
+  app.use('/api/v1/public/quarterly-reports', createQuarterlyReportPublicRouter(quarterlyReportRepository, quarterlyReportStorage, quarterlyReportDownloadTokenService, config))
   app.use('/api/v1/public', createPublicReportRouter(reportRepository, reportAssetStorage, reportAccessTokenService))
   app.use('/api/v1/admin', createAdminRouter(adminRepository, reportRepository, reportAssetStorage, exportRepository, authService, config))
   app.use('/api/v1/admin/report-delivery', createReportDeliveryRouter(reportDeliveryRepository, submissionReportStorage, reportAssetStorage, reportMailer, authService, config))
+  app.use('/api/v1/admin/quarterly-reports', createQuarterlyReportAdminRouter(quarterlyReportRepository, quarterlyReportStorage, authService, config))
   app.use(handleNotFound)
   app.use(handleError(logger))
   return app

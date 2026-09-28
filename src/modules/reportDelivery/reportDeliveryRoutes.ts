@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { Router, type Request } from 'express'
 import type { RuntimeConfig } from '../../config/runtime.js'
-import { getRequiredAdminSession, requireAdminSession } from '../../http/adminSession.js'
+import { createAdminRequestRateLimit, getRequiredAdminSession, requireAdminSession } from '../../http/adminSession.js'
 import { HttpError } from '../../http/errors.js'
 import type { AuthService } from '../auth/authService.js'
 import { ReportAssetStorageError, type ReportAssetStorage } from '../reports/reportAssetStorage.js'
@@ -53,6 +53,7 @@ export function createReportDeliveryRouter(
 ) {
   const router = Router()
   router.use(requireAdminSession(authService, config))
+  router.use(createAdminRequestRateLimit(config))
 
   router.get('/submissions/status', async (req, res, next) => {
     try {

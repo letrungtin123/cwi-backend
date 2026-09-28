@@ -3,7 +3,7 @@ import { pipeline } from 'node:stream/promises'
 import { Router } from 'express'
 import type { RuntimeConfig } from '../../config/runtime.js'
 import { decodeCursor } from '../../http/cursor.js'
-import { getRequiredAdminSession, requireAdminSession } from '../../http/adminSession.js'
+import { createAdminRequestRateLimit, getRequiredAdminSession, requireAdminSession } from '../../http/adminSession.js'
 import { HttpError } from '../../http/errors.js'
 import type { AuthService } from '../auth/authService.js'
 import { createExportRouter } from '../exports/exportRoutes.js'
@@ -143,6 +143,7 @@ export function createAdminRouter(
   const router = Router()
 
   router.use(requireAdminSession(authService, config))
+  router.use(createAdminRequestRateLimit(config))
   router.use('/exports', createExportRouter(exportRepository, reportAssetStorage, config))
 
   router.get('/roundtable-registrations/stats', async (_req, res, next) => {

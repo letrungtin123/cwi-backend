@@ -14,6 +14,8 @@ export type AuthConfig = {
 }
 
 export type RuntimeConfig = {
+  adminRateLimitMax: number
+  adminRateLimitWindowMs: number
   adminCursorSecret: string
   adminExportEnabled: boolean
   reportDeliveryEnabled: boolean
@@ -23,6 +25,11 @@ export type RuntimeConfig = {
   reportPublicTokenSecret: string
   reportPublicTokenTtlSeconds: number
   reportUploadMaxBytes: number
+  quarterlyReportBucket: string
+  quarterlyReportDownloadTokenSecret: string
+  quarterlyReportDownloadTokenTtlSeconds: number
+  quarterlyReportUploadMaxBytes: number
+  quarterlyReportsEnabled: boolean
   auth: AuthConfig
   corsAllowedOrigins: string[]
   ipHashSecret: string

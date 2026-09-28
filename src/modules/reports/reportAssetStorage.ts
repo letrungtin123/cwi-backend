@@ -30,7 +30,9 @@ export type ReportObjectPaths = {
 export type ReportAssetDownload = {
   body: ReadableStream<Uint8Array>
   contentLength: string | null
+  contentRange: string | null
   contentType: string
+  status: number
 }
 
 export type ReportObjectPathInput = {
@@ -130,11 +132,12 @@ export class ReportAssetStorage {
     })
   }
 
-  async download(objectPath: string): Promise<ReportAssetDownload> {
+  async download(objectPath: string, range?: string): Promise<ReportAssetDownload> {
     assertObjectPath(objectPath)
-    const response = await this.request(`object/authenticated/${encodeURIComponent(this.config.bucket)}/${encodeObjectPath(objectPath)}`, {
-      method: 'GET',
-    })
+    const response = await this.request(
+      `object/authenticated/${encodeURIComponent(this.config.bucket)}/${encodeObjectPath(objectPath)}`,
+      range ? { headers: { range }, method: 'GET' } : { method: 'GET' },
+    )
 
     if (!response.body) {
       throw new ReportAssetStorageError('Supabase Storage returned an empty file stream.', {
@@ -147,7 +150,9 @@ export class ReportAssetStorage {
     return {
       body: response.body,
       contentLength: response.headers.get('content-length'),
+      contentRange: response.headers.get('content-range'),
       contentType: response.headers.get('content-type') ?? 'application/octet-stream',
+      status: response.status,
     }
   }
 
@@ -194,4 +199,3 @@ export class ReportAssetStorage {
     }
   }
 }
-
