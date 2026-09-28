@@ -6,6 +6,7 @@ param(
   [string]$Source4Path = '',
   [string]$DashboardPath = '',
   [string]$FrontendApiBaseUrl = '/api',
+  [string]$LandingBaseUrl = 'https://ceo-workforce-index.com',
   [switch]$SkipInstall,
   [switch]$PruneLegacySource
 )
@@ -27,6 +28,7 @@ $buildArgs = @('-File', $builder)
 if ($Source4Path) { $buildArgs += @('-Source4Path', $Source4Path) }
 if ($DashboardPath) { $buildArgs += @('-DashboardPath', $DashboardPath) }
 if ($FrontendApiBaseUrl) { $buildArgs += @('-FrontendApiBaseUrl', $FrontendApiBaseUrl) }
+if ($LandingBaseUrl) { $buildArgs += @('-LandingBaseUrl', $LandingBaseUrl) }
 if ($SkipInstall) { $buildArgs += '-SkipInstall' }
 $buildOutput = @(& pwsh @buildArgs)
 $builderExitCode = $LASTEXITCODE
