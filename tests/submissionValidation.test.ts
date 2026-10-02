@@ -228,20 +228,43 @@ describe('normalizeWebinarRegistration', () => {
     const registration = normalizeWebinarRegistration(
       {
         clientMeta: { path: '/' },
+        companyName: '  Công ty CWI  ',
         email: 'WEBINAR@Company.com',
         fullName: '  Nguyễn   Văn An  ',
+        phone: '090 123 4567',
         position: ' CEO / Tổng Giám đốc ',
-        surveySubmissionIdempotencyKey: 'source4:survey-key-1',
       },
       'webinar-key-1',
     )
 
+    expect(registration.companyName).toBe('Công ty CWI')
     expect(registration.email).toBe('webinar@company.com')
     expect(registration.fullName).toBe('Nguyễn Văn An')
     expect(registration.idempotencyKey).toBe('webinar-key-1')
+    expect(registration.phone).toBe('+84901234567')
     expect(registration.position).toBe('CEO / Tổng Giám đốc')
-    expect(registration.surveySubmissionIdempotencyKey).toBe('source4:survey-key-1')
+    expect(registration.surveySubmissionIdempotencyKey).toBeNull()
     expect(registration.payloadHash).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  it('requires company and phone for a standalone webinar registration', () => {
+    expect(() => normalizeWebinarRegistration({
+      email: 'webinar@company.com',
+      fullName: 'Nguyễn Văn An',
+      position: 'CEO',
+    }, 'webinar-key-1')).toThrow(HttpError)
+  })
+
+  it('allows the post-survey Webinar flow without duplicate contact fields', () => {
+    const registration = normalizeWebinarRegistration({
+      email: 'webinar@company.com',
+      fullName: 'Nguyễn Văn An',
+      position: 'CEO',
+      surveySubmissionIdempotencyKey: 'source4:survey-key-1',
+    }, 'webinar-key-1')
+
+    expect(registration.companyName).toBeNull()
+    expect(registration.phone).toBeNull()
   })
 })
 

@@ -156,10 +156,12 @@ export type RoundtableSubmissionSummary = {
 }
 
 export type RoundtableRegistrationListItem = {
+  companyName: string | null
   email: string
   fullName: string
   id: string
   linkedSubmission: RoundtableSubmissionSummary | null
+  phone: string | null
   position: string | null
   registeredAt: string
   source: string
@@ -203,10 +205,12 @@ type StatsRow = {
 
 type RoundtableRegistrationRow = {
   client_meta: Record<string, unknown>
+  company_name: string | null
   email: string
   full_name: string
   id: string
   position: string | null
+  phone: string | null
   registered_at: Date
   report_job_id: string | null
   report_last_error_message: string | null
@@ -280,7 +284,9 @@ const roundtableSelect = `
   SELECT
     r.id,
     r.full_name,
+    NULL::text AS company_name,
     r.email,
+    NULL::text AS phone,
     r.position,
     r.registered_at,
     r.source,
@@ -312,7 +318,10 @@ const roundtableSelect = `
   ) AS report ON true
 `
 
-const webinarSelect = roundtableSelect.replace('public.cwi_roundtable_registrations', 'public.cwi_webinar_registrations')
+const webinarSelect = roundtableSelect
+  .replace('NULL::text AS company_name', 'r.company_name')
+  .replace('NULL::text AS phone', 'r.phone')
+  .replace('public.cwi_roundtable_registrations', 'public.cwi_webinar_registrations')
 
 function toIso(value: Date) {
   return value.toISOString()
@@ -478,10 +487,12 @@ function mapRoundtableLinkedSubmission(row: RoundtableRegistrationRow): Roundtab
 
 function mapRoundtableRegistration(row: RoundtableRegistrationRow): RoundtableRegistrationListItem {
   return {
+    companyName: row.company_name,
     email: row.email,
     fullName: row.full_name,
     id: row.id,
     linkedSubmission: mapRoundtableLinkedSubmission(row),
+    phone: row.phone,
     position: row.position,
     registeredAt: toIso(row.registered_at),
     source: row.source,
