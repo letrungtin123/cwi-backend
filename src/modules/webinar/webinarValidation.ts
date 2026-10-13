@@ -11,6 +11,7 @@ export type NormalizedWebinarRegistration = {
   payloadHash: string
   phone: string | null
   position: string | null
+  speakerQuestion: string | null
   surveySubmissionIdempotencyKey: string | null
 }
 
@@ -36,6 +37,7 @@ const rawWebinarRegistrationSchema = z
     idempotencyKey: idempotencyKeySchema.optional(),
     phone: z.string().trim().min(8).max(32).optional(),
     position: z.string().trim().min(1).max(160).optional(),
+    speakerQuestion: z.string().trim().min(1).max(1000).optional(),
     surveySubmissionIdempotencyKey: idempotencyKeySchema.optional(),
   })
   .strict()
@@ -109,6 +111,7 @@ export function normalizeWebinarRegistration(payload: unknown, headerIdempotency
     idempotencyKey: idempotencyKey ?? null,
     phone: normalizePhone(raw.phone),
     position: raw.position ? normalizeText(raw.position) : null,
+    speakerQuestion: raw.speakerQuestion ? normalizeText(raw.speakerQuestion) : null,
     surveySubmissionIdempotencyKey: raw.surveySubmissionIdempotencyKey ?? null,
   }
 

@@ -165,6 +165,7 @@ export type RoundtableRegistrationListItem = {
   position: string | null
   registeredAt: string
   source: string
+  speakerQuestion: string | null
 }
 
 export type RoundtableRegistrationDetail = RoundtableRegistrationListItem & {
@@ -212,6 +213,7 @@ type RoundtableRegistrationRow = {
   position: string | null
   phone: string | null
   registered_at: Date
+  speaker_question: string | null
   report_job_id: string | null
   report_last_error_message: string | null
   report_pdf_storage_path: string | null
@@ -287,6 +289,7 @@ const roundtableSelect = `
     NULL::text AS company_name,
     r.email,
     NULL::text AS phone,
+    NULL::text AS speaker_question,
     r.position,
     r.registered_at,
     r.source,
@@ -321,6 +324,7 @@ const roundtableSelect = `
 const webinarSelect = roundtableSelect
   .replace('NULL::text AS company_name', 'r.company_name')
   .replace('NULL::text AS phone', 'r.phone')
+  .replace('NULL::text AS speaker_question', 'r.speaker_question')
   .replace('public.cwi_roundtable_registrations', 'public.cwi_webinar_registrations')
 
 function toIso(value: Date) {
@@ -496,6 +500,7 @@ function mapRoundtableRegistration(row: RoundtableRegistrationRow): RoundtableRe
     position: row.position,
     registeredAt: toIso(row.registered_at),
     source: row.source,
+    speakerQuestion: row.speaker_question,
   }
 }
 

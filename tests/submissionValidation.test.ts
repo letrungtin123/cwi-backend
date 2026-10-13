@@ -233,6 +233,7 @@ describe('normalizeWebinarRegistration', () => {
         fullName: '  Nguyễn   Văn An  ',
         phone: '090 123 4567',
         position: ' CEO / Tổng Giám đốc ',
+        speakerQuestion: '  CEO nên bắt đầu từ đâu?  ',
       },
       'webinar-key-1',
     )
@@ -243,6 +244,7 @@ describe('normalizeWebinarRegistration', () => {
     expect(registration.idempotencyKey).toBe('webinar-key-1')
     expect(registration.phone).toBe('+84901234567')
     expect(registration.position).toBe('CEO / Tổng Giám đốc')
+    expect(registration.speakerQuestion).toBe('CEO nên bắt đầu từ đâu?')
     expect(registration.surveySubmissionIdempotencyKey).toBeNull()
     expect(registration.payloadHash).toMatch(/^[a-f0-9]{64}$/)
   })
@@ -265,6 +267,7 @@ describe('normalizeWebinarRegistration', () => {
 
     expect(registration.companyName).toBeNull()
     expect(registration.phone).toBeNull()
+    expect(registration.speakerQuestion).toBeNull()
   })
 })
 

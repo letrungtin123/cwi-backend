@@ -199,6 +199,7 @@ export class PgWebinarRepository implements WebinarRepository {
           phone,
           company_name,
           position,
+          speaker_question,
           idempotency_key,
           payload_hash,
           survey_submission_idempotency_key,
@@ -209,7 +210,7 @@ export class PgWebinarRepository implements WebinarRepository {
           linked_at
         )
         VALUES (
-          $1, true, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb,
+          $1, true, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb,
           CASE WHEN $1::uuid IS NULL THEN NULL ELSE now() END
         )
         RETURNING id, registered_at, submission_id
@@ -221,6 +222,7 @@ export class PgWebinarRepository implements WebinarRepository {
           input.phone,
           input.companyName,
           input.position,
+          input.speakerQuestion,
           input.idempotencyKey,
           input.payloadHash,
           input.surveySubmissionIdempotencyKey,
