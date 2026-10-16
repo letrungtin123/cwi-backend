@@ -167,6 +167,7 @@ function addOverview(workbook: ExcelJS.stream.xlsx.WorkbookWriter, job: ClaimedE
     ['Loại dữ liệu', datasetLabel],
     ['Thời gian tạo', job.created_at],
     ['Trạng thái lọc', filters.status ? statusLabel(filters.status) : 'Tất cả trạng thái'],
+    ...(job.dataset === 'submissions' ? [['Quý khảo sát', filters.surveyVersion ?? 'Tất cả quý'] as CellValue[]] : []),
     ...(job.dataset === 'submissions' ? [['Đăng ký Roundtable', filters.roundtableRegistered === undefined ? 'Tất cả' : yesNo(filters.roundtableRegistered)] as CellValue[]] : []),
     ['Tình trạng liên kết', filters.linkStatus === undefined ? 'Tất cả' : filters.linkStatus === 'linked' ? 'Đã khảo sát' : 'Đăng ký riêng'],
     ['Từ khóa tìm kiếm', filters.search ? sanitizeExcelCell(filters.search) : 'Không lọc'],
@@ -193,8 +194,10 @@ function buildSubmissionValues(row: {
   status_note: string
   submission_status: string
   submitted_at: Date
+  survey_version: string
 }) {
   return [
+    row.survey_version,
     row.full_name,
     row.email,
     row.phone ?? '',
@@ -271,13 +274,13 @@ export class ExportWorkbookService {
       const registrationLabel = job.dataset === 'roundtable' ? 'Roundtable' : 'Webinar'
       const primaryHeaders =
         job.dataset === 'submissions'
-          ? ['Họ tên', 'Email', 'Số điện thoại', 'Chức vụ', 'Trạng thái khảo sát', 'Ghi chú trạng thái', 'Bảo mật dữ liệu', 'Đã trả lời Phần 1', 'Đã trả lời Phần 2', 'Số câu trả lời', 'Đăng ký Roundtable', 'Trạng thái báo cáo', 'Thời gian gửi']
+          ? ['Quý khảo sát', 'Họ tên', 'Email', 'Số điện thoại', 'Chức vụ', 'Trạng thái khảo sát', 'Ghi chú trạng thái', 'Bảo mật dữ liệu', 'Đã trả lời Phần 1', 'Đã trả lời Phần 2', 'Số câu trả lời', 'Đăng ký Roundtable', 'Trạng thái báo cáo', 'Thời gian gửi']
           : ['Họ tên', 'Email', 'Chức vụ', 'Tình trạng', 'Thời gian đăng ký', 'Trạng thái khảo sát', 'Trạng thái báo cáo', 'Họ tên trong khảo sát', 'Email trong khảo sát', 'Chức vụ trong khảo sát', 'Số câu trả lời', 'Bảo mật dữ liệu', 'Thời gian gửi khảo sát']
-      const primaryWidths = job.dataset === 'submissions' ? [24, 30, 18, 24, 34, 38, 18, 18, 18, 15, 20, 22, 20] : [24, 30, 24, 18, 20, 34, 22, 24, 30, 24, 15, 18, 22]
+      const primaryWidths = job.dataset === 'submissions' ? [14, 24, 30, 18, 24, 34, 38, 18, 18, 18, 15, 20, 22, 20] : [24, 30, 24, 18, 20, 34, 22, 24, 30, 24, 15, 18, 22]
       const primarySheet = createSheetWriter(workbook, job.dataset === 'submissions' ? 'Lượt gửi khảo sát' : `Đăng ký ${registrationLabel}`, primaryHeaders, primaryWidths)
       const answerSheet =
         job.dataset === 'submissions'
-          ? createSheetWriter(workbook, 'Câu trả lời', ['Họ tên', 'Email', 'Phần', 'Số câu', 'Câu hỏi', 'Câu trả lời', 'Nội dung khác', 'Thời gian gửi'], [24, 30, 10, 10, 70, 34, 34, 20])
+          ? createSheetWriter(workbook, 'Câu trả lời', ['Quý khảo sát', 'Họ tên', 'Email', 'Phần', 'Số câu', 'Câu hỏi', 'Câu trả lời', 'Nội dung khác', 'Thời gian gửi'], [14, 24, 30, 10, 10, 70, 34, 34, 20])
           : null
       const linkedSheet =
         job.dataset !== 'submissions'
@@ -294,6 +297,7 @@ export class ExportWorkbookService {
           const answers = await this.repository.listAnswerBatch(batch.rows.map((row) => row.id))
           for (const answer of answers) {
             answerSheet?.add([
+              answer.survey_version,
               answer.full_name,
               answer.email,
               answer.part,

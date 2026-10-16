@@ -28,53 +28,8 @@ export type ReportJobCreateInput = {
   requestPayload: AiReportPayload
 }
 
-const aiQuestionTextByIdx = new Map<number, string>([
-  [1, 'Doanh nghiệp của chúng tôi có đủ năng lực nhân sự để đạt mục tiêu tăng trưởng mong muốn trong 2–3 năm tới.'],
-  [2, 'Đội ngũ quản lý của chúng tôi chuyển hóa chiến lược thành kết quả một cách hiệu quả.'],
-  [3, 'Tôi tin tưởng vào năng lực của đội ngũ quản lý.'],
-  [4, 'Đội ngũ quản lý hiện tại đủ sức hỗ trợ kế hoạch tăng trưởng mà CEO mong đợi.'],
-  [5, 'Chúng tôi giữ chân được nhân tài quan trọng.'],
-  // CWI AI V3 validates the transport question against its own fixed registry.
-  // The local survey keeps its current UI wording independently.
-  [6, 'Tôi tin Hệ năng lực (bao gồm con người, AI, công nghệ, dữ liệu, đối tác) hiện tại sẽ tạo lợi thế cạnh tranh trong 3 năm tới.'],
-  [7, 'Đội ngũ quản lý của chúng tôi có thể chuyển các ưu tiên chiến lược thành hành động nhất quán trong đơn vị mình phụ trách.'],
-  [8, 'Các quản lý có đủ quyền và năng lực để tự ra quyết định trong phạm vi trách nhiệm mà không phải phụ thuộc quá nhiều vào cấp trên.'],
-  [9, 'Các quản lý chủ động phát triển đội ngũ kế cận thay vì chỉ tập trung hoàn thành mục tiêu ngắn hạn.'],
-  [10, 'Nếu một quản lý chủ chốt rời khỏi doanh nghiệp trong hôm nay, chúng tôi có người đủ năng lực để thay thế trong thời gian hợp lý.'],
-  [11, 'Chúng tôi có khả năng xác định sớm những nhân sự có tiềm năng trở thành lãnh đạo trong tương lai.'],
-  [12, 'Các chương trình phát triển lãnh đạo đã tạo ra sự cải thiện rõ rệt trong chất lượng quản lý và kết quả kinh doanh.'],
-  [13, 'Đội ngũ quản lý của chúng tôi thích nghi nhanh với những thay đổi về công nghệ, dữ liệu và cách thức làm việc mới.'],
-  [14, 'CEO và Giám đốc nhân sự có cùng quan điểm về chất lượng đội ngũ quản lý và các ưu tiên phát triển trong 12 tháng tới.'],
-  [15, 'Khi doanh nghiệp mở rộng quy mô hoặc triển khai chiến lược mới, đội ngũ quản lý hiện tại đủ năng lực để dẫn dắt sự thay đổi.'],
-  [16, 'Những quản lý giỏi nhất trong doanh nghiệp đang giúp nhân rộng năng lực cho tổ chức, thay vì chỉ tạo ra kết quả trong phạm vi đội ngũ của mình.'],
-  [17, 'Trong 12 tháng tới, rủi ro lớn nhất đối với tăng trưởng của doanh nghiệp liên quan đến đội ngũ quản lý là gì?'],
-  [18, 'Nếu chỉ được đầu tư vào một ưu tiên duy nhất trong năm tới, anh/chị sẽ chọn điều gì?'],
-  [19, 'Khi doanh nghiệp cần đưa ra một quyết định quan trọng trong vòng 48 giờ, điều nào mô tả đúng nhất?'],
-  [20, 'Nếu ngày mai doanh nghiệp mở thêm một chi nhánh, nhà máy hoặc đơn vị kinh doanh mới, điều gì sẽ là thách thức lớn nhất trong 90 ngày đầu?'],
-  [21, 'Nếu anh/chị vắng mặt trong ba tháng, điều gì khiến anh/chị lo ngại nhất?'],
-  [22, 'Hiện nay, điều gì đang giới hạn khả năng tăng trưởng của doanh nghiệp nhiều nhất?'],
-  [23, 'Quy mô doanh thu của công ty hiện nay'],
-  [24, 'Website công ty'],
-])
-
-const aiOtherTextIdxs = new Set([17, 18, 19, 20, 21, 22])
-
-const aiAnswerLabelByIdx = new Map<number, Map<string, string>>([
-  [17, new Map([
-    ['CEO và HR chưa thống nhất', 'CEO và Nhân sự chưa thống nhất'],
-  ])],
-  [23, new Map([
-    // V3 validates revenue answers against its registered labels. Keep the
-    // local survey labels unchanged and translate only at the AI boundary.
-    ['Dưới 100 tỷ VND', 'Dưới 100 tỷ VND'],
-    ['Từ 100 - <300 tỷ VND', 'Từ 100 - <300 tỷ VND'],
-    ['Từ 300 - <1,000 tỷ VND', 'Từ 300 - <1,000 tỷ VND'],
-    ['Từ 1,000 - <5,000 tỷ VND', 'Từ 1,000 - <5,000 tỷ VND'],
-    ['Từ 5,000 - <10,000 tỷ VND', 'Từ 5,000 - <10,000 tỷ VND'],
-    ['Trên 10,000 tỷ VND', 'Trên 10,000 tỷ VND'],
-  ])],
-])
-
+// Report jobs keep the payload they were created with, so a retried 2026Q3 job
+// is resent with 2026Q3 content. Only its legacy question 17 label needs fixing.
 export function normalizeStoredReportPayload(payload: unknown) {
   if (!payload || typeof payload !== 'object' || !Array.isArray((payload as { answers?: unknown }).answers)) return payload
 
@@ -90,38 +45,14 @@ export function normalizeStoredReportPayload(payload: unknown) {
   }
 }
 
-function aiQuestionText(idx: number) {
-  return aiQuestionTextByIdx.get(idx) ?? ''
-}
-
-function aiAnswerValue(answer: NormalizedAnswer) {
-  if (answer.otherText) {
-    if (aiOtherTextIdxs.has(answer.idx)) {
-      return { answer: 'Khác', other_text: answer.otherText }
-    }
-
-    return { answer: answer.otherText }
-  }
-
-  if (typeof answer.answerForReport !== 'string') {
-    return { answer: answer.answerForReport }
-  }
-
-  if (answer.answerForReport === OTHER_OPTION) {
-    return { answer: 'Khác' }
-  }
-
-  return {
-    answer: aiAnswerLabelByIdx.get(answer.idx)?.get(answer.answerForReport) ?? answer.answerForReport,
-  }
-}
-
+// Survey question and option text is the CWI AI V3 registry text, so answers
+// are forwarded verbatim. An "other" choice sends the option plus its text.
 function toAiAnswer(answer: NormalizedAnswer): AiReportAnswer {
-  return {
-    idx: answer.idx,
-    question: aiQuestionText(answer.idx),
-    ...aiAnswerValue(answer),
+  if (answer.otherText) {
+    return { answer: OTHER_OPTION, idx: answer.idx, other_text: answer.otherText, question: answer.questionText }
   }
+
+  return { answer: answer.answerForReport, idx: answer.idx, question: answer.questionText }
 }
 
 function buildBasePayload(submission: NormalizedSurveySubmission): Omit<AiReportPayload, 'answers'> {
@@ -140,10 +71,11 @@ function buildBasePayload(submission: NormalizedSurveySubmission): Omit<AiReport
 export function buildReportJobRequest(submission: NormalizedSurveySubmission): ReportJobCreateInput {
   const reportType: AiReportType = submission.submissionStatus === 'full_private_report' ? 'personalized' : 'anonymous'
   const endpoint = reportType === 'personalized' ? '/v3/reports/personalized' : '/v3/reports/anonymous'
-  const maxQuestionIdx = reportType === 'personalized' ? 24 : 18
+  // The anonymous report accepts exactly the 18 Part 1 answers.
+  const answers = reportType === 'personalized' ? submission.answers : submission.answers.filter((answer) => answer.part === 1)
   const requestPayload: AiReportPayload = {
     ...buildBasePayload(submission),
-    answers: submission.answers.filter((answer) => answer.idx <= maxQuestionIdx).map(toAiAnswer),
+    answers: answers.map(toAiAnswer),
   }
 
   return {

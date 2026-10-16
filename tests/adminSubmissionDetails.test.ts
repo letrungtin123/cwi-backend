@@ -22,6 +22,7 @@ const submissionRow = {
   status_note: 'Hoàn thành Phần 1.',
   submitted_at: new Date('2026-08-27T00:00:00.000Z'),
   submission_status: 'part1_only',
+  survey_version: '2026Q3',
 }
 
 function createRepository() {
@@ -121,5 +122,47 @@ describe('full submission PDF status', () => {
     expect(reportStatusQueries).toHaveLength(2)
     expect(reportStatusQueries.every((sql) => sql.includes("= $1"))).toBe(true)
     expect(query.mock.calls.some(([, params]) => params?.[0] === 'failed')).toBe(true)
+  })
+})
+
+describe('submission survey version filter', () => {
+  it('filters the cursor page and returns the stored question set', async () => {
+    const { query, repository } = createRepository()
+
+    const result = await repository.listSubmissionsPage({
+      before: null,
+      beforeId: null,
+      limit: 10,
+      reportStatus: null,
+      reportPdfUploaded: null,
+      roundtableRegistered: null,
+      search: null,
+      status: null,
+      surveyVersion: '2026Q3',
+    })
+
+    expect(result.items[0]?.surveyVersion).toBe('2026Q3')
+    const [pageQuery, pageParams] = query.mock.calls.find(([sql]) => sql.includes('ORDER BY s.submitted_at DESC, s.id DESC')) ?? []
+    expect(pageQuery).toContain('s.survey_version = $1')
+    expect(pageParams?.[0]).toBe('2026Q3')
+  })
+
+  it('applies the filter to the full list page and count queries', async () => {
+    const { query, repository } = createRepository()
+
+    await repository.listSubmissionDetails({
+      limit: 10,
+      page: 1,
+      reportStatus: null,
+      reportPdfUploaded: null,
+      roundtableRegistered: null,
+      search: null,
+      status: null,
+      surveyVersion: '2026Q4',
+    })
+
+    const versionQueries = query.mock.calls.filter(([sql]) => sql.includes('s.survey_version = $1'))
+    expect(versionQueries).toHaveLength(2)
+    expect(versionQueries.every(([, params]) => params?.[0] === '2026Q4')).toBe(true)
   })
 })

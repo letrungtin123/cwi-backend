@@ -29,6 +29,7 @@ export type SubmissionListItem = {
   statusNote: string
   submittedAt: string
   submissionStatus: string
+  surveyVersion: string
 }
 
 export type SubmissionDetail = SubmissionListItem & {
@@ -65,6 +66,7 @@ export type SubmissionDetailListFilters = {
   roundtableRegistered: boolean | null
   search: string | null
   status: string | null
+  surveyVersion?: string | null
 }
 
 export type SubmissionDetailListResult = {
@@ -92,6 +94,7 @@ type SubmissionRow = {
   status_note: string
   submitted_at: Date
   submission_status: string
+  survey_version: string
 }
 
 type AnswerRow = {
@@ -124,6 +127,7 @@ export type SubmissionListFilters = {
   roundtableRegistered: boolean | null
   search: string | null
   status: string | null
+  surveyVersion?: string | null
 }
 
 export type CursorPage<T> = {
@@ -137,6 +141,9 @@ export type SubmissionStats = {
   part1Only: number
   part2RefusedPrivacy: number
   roundtableRegistered: number
+  // Every question set that has submissions, newest first, independent of the
+  // selected surveyVersion so the dashboard can always offer all quarters.
+  surveyVersions: Array<{ surveyVersion: string; totalSubmissions: number }>
   totalSubmissions: number
 }
 
@@ -262,6 +269,7 @@ const submissionSelect = `
     s.answers_count,
     s.roundtable_registered,
     s.submitted_at,
+    s.survey_version,
     EXISTS (
       SELECT 1
       FROM public.cwi_submission_report_files AS uploaded_report
@@ -408,6 +416,7 @@ function mapListItem(row: SubmissionRow): SubmissionListItem {
     statusNote: row.status_note,
     submittedAt: toIso(row.submitted_at),
     submissionStatus: row.submission_status,
+    surveyVersion: row.survey_version,
   }
 }
 
@@ -548,6 +557,11 @@ function appendSubmissionDetailFilters(
     where.push('s.submission_status = $' + params.length)
   }
 
+  if (filters.surveyVersion) {
+    params.push(filters.surveyVersion)
+    where.push('s.survey_version = $' + params.length)
+  }
+
   if (filters.roundtableRegistered !== null) {
     params.push(filters.roundtableRegistered)
     where.push('s.roundtable_registered = $' + params.length)
@@ -592,7 +606,7 @@ function appendSubmissionDetailFilters(
 export class PgAdminRepository {
   private roundtableStatsCache: TimedCache<RoundtableRegistrationStats> | null = null
   private webinarStatsCache: TimedCache<WebinarRegistrationStats> | null = null
-  private submissionStatsCache: TimedCache<SubmissionStats> | null = null
+  private readonly submissionStatsCache = new Map<string, TimedCache<SubmissionStats>>()
 
   constructor(
     private readonly pool: pg.Pool,
@@ -831,6 +845,11 @@ export class PgAdminRepository {
       where.push('s.submission_status = $' + params.length)
     }
 
+    if (filters.surveyVersion) {
+      params.push(filters.surveyVersion)
+      where.push('s.survey_version = $' + params.length)
+    }
+
     appendLatestReportStatusFilter(where, params, filters.reportStatus)
 
     if (filters.roundtableRegistered !== null) {
@@ -990,20 +1009,34 @@ export class PgAdminRepository {
     }
   }
 
-  async getSubmissionStats(): Promise<SubmissionStats> {
-    if (this.submissionStatsCache && this.submissionStatsCache.expiresAt > Date.now()) return this.submissionStatsCache.value
+  async getSubmissionStats(surveyVersion: string | null = null): Promise<SubmissionStats> {
+    const cacheKey = surveyVersion ?? 'all'
+    const cached = this.submissionStatsCache.get(cacheKey)
+    if (cached && cached.expiresAt > Date.now()) return cached.value
 
-    const result = await this.pool.query<StatsRow>(
-      `
-      SELECT
-        count(*)::text AS total_submissions,
-        count(*) FILTER (WHERE submission_status = 'part1_only')::text AS part1_only,
-        count(*) FILTER (WHERE submission_status = 'part2_refused_privacy')::text AS part2_refused_privacy,
-        count(*) FILTER (WHERE submission_status = 'full_private_report')::text AS full_private_report,
-        count(*) FILTER (WHERE roundtable_registered = true)::text AS roundtable_registered
-      FROM public.cwi_survey_submissions
-      `,
-    )
+    const [result, versionsResult] = await Promise.all([
+      this.pool.query<StatsRow>(
+        `
+        SELECT
+          count(*)::text AS total_submissions,
+          count(*) FILTER (WHERE submission_status = 'part1_only')::text AS part1_only,
+          count(*) FILTER (WHERE submission_status = 'part2_refused_privacy')::text AS part2_refused_privacy,
+          count(*) FILTER (WHERE submission_status = 'full_private_report')::text AS full_private_report,
+          count(*) FILTER (WHERE roundtable_registered = true)::text AS roundtable_registered
+        FROM public.cwi_survey_submissions
+        WHERE $1::text IS NULL OR survey_version = $1
+        `,
+        [surveyVersion],
+      ),
+      this.pool.query<{ survey_version: string; total_submissions: string }>(
+        `
+        SELECT survey_version, count(*)::text AS total_submissions
+        FROM public.cwi_survey_submissions
+        GROUP BY survey_version
+        ORDER BY survey_version DESC
+        `,
+      ),
+    ])
 
     const row = result.rows[0]
     const value = {
@@ -1011,9 +1044,13 @@ export class PgAdminRepository {
       part1Only: toNumber(row?.part1_only ?? null),
       part2RefusedPrivacy: toNumber(row?.part2_refused_privacy ?? null),
       roundtableRegistered: toNumber(row?.roundtable_registered ?? null),
+      surveyVersions: versionsResult.rows.map((version) => ({
+        surveyVersion: version.survey_version,
+        totalSubmissions: toNumber(version.total_submissions),
+      })),
       totalSubmissions: toNumber(row?.total_submissions ?? null),
     }
-    this.submissionStatsCache = { expiresAt: Date.now() + statsCacheTtlMs, value }
+    this.submissionStatsCache.set(cacheKey, { expiresAt: Date.now() + statsCacheTtlMs, value })
     return value
   }
 
