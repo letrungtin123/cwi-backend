@@ -11,49 +11,22 @@ export type SurveyScores = {
   scaleScore: number
 }
 
-const surveyDomains = [
-  { name: 'Thực thi chiến lược', questionNumbers: [2, 7, 15] },
-  { name: 'Năng lực quản lý', questionNumbers: [3, 4, 8, 16] },
-  { name: 'Kế nhiệm & nhân tài', questionNumbers: [5, 9, 10, 11, 12] },
-  { name: 'Thích nghi & Hệ cộng lực', questionNumbers: [1, 6, 13] },
-  { name: 'CEO–Nhân sự Alignment', questionNumbers: [14] },
-] as const
-
-function scoreFor(questionNumbers: readonly number[], answers: Map<number, number>) {
-  const values = questionNumbers
-    .map((number) => answers.get(number))
+// Unweighted mean of Q1-Q16 on the CWI AI 0-100 scale (1 -> 0, 5 -> 100).
+// The weighted edition indexes are computed by CWI AI and live in its report;
+// the 2026Q4 edition has no local domain or scale grouping, so those stay empty.
+export function getSurveyScores(answers: readonly NormalizedAnswer[]): SurveyScores {
+  const values = answers
+    .filter((answer) => answer.questionType === 'likert' && answer.idx <= 16)
+    .map((answer) => answer.answerForReport)
     .filter((value): value is number => typeof value === 'number' && value >= 1 && value <= 5)
 
-  if (!values.length) return 0
-
-  return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 20)
-}
-
-export function getSurveyScores(answers: readonly NormalizedAnswer[]): SurveyScores {
-  const likertAnswers = new Map<number, number>()
-
-  for (const answer of answers) {
-    if (answer.questionType === 'likert' && typeof answer.answerForReport === 'number') {
-      likertAnswers.set(answer.idx, answer.answerForReport)
-    }
-  }
-
-  const domainScores = surveyDomains.map((domain) => ({
-    name: domain.name,
-    value: scoreFor(domain.questionNumbers, likertAnswers),
-  }))
-
-  const overallValues = Array.from({ length: 16 }, (_unused, index) => likertAnswers.get(index + 1)).filter(
-    (value): value is number => typeof value === 'number' && value >= 1 && value <= 5,
-  )
-
-  const overallScore = overallValues.length
-    ? Math.round((overallValues.reduce((sum, value) => sum + value, 0) / overallValues.length) * 20)
+  const overallScore = values.length
+    ? Math.round((values.reduce((sum, value) => sum + (value - 1), 0) / values.length) * 25)
     : 0
 
   return {
-    domainScores,
+    domainScores: [],
     overallScore,
-    scaleScore: scoreFor([1, 4, 6, 15, 16], likertAnswers),
+    scaleScore: 0,
   }
 }

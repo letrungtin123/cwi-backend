@@ -16,6 +16,7 @@ type SubmissionExportRow = {
   status_note: string
   submission_status: string
   submitted_at: Date
+  survey_version: string
   id: string
 }
 
@@ -30,6 +31,7 @@ type AnswerExportRow = {
   question_text: string
   submitted_at: Date
   submission_id: string
+  survey_version: string
 }
 
 type RoundtableExportRow = {
@@ -227,6 +229,10 @@ export class PgExportRepository {
       params.push(filters.status)
       where.push('s.submission_status = $' + params.length)
     }
+    if (filters.surveyVersion) {
+      params.push(filters.surveyVersion)
+      where.push('s.survey_version = $' + params.length)
+    }
     if (filters.roundtableRegistered !== undefined) {
       params.push(filters.roundtableRegistered)
       where.push('s.roundtable_registered = $' + params.length)
@@ -240,7 +246,7 @@ export class PgExportRepository {
       [
         'SELECT s.id, s.full_name, s.email, s.phone, s.position, s.submission_status, s.status_note, s.privacy_consent,',
         '       s.part1_completed, s.part2_completed, s.answers_count, s.roundtable_registered, s.submitted_at,',
-        '       report.status AS report_status',
+        '       s.survey_version, report.status AS report_status',
         'FROM public.cwi_survey_submissions AS s',
         'LEFT JOIN LATERAL (',
         '  SELECT status FROM public.cwi_report_jobs',
@@ -268,7 +274,7 @@ export class PgExportRepository {
     const result = await this.pool.query<AnswerExportRow>(
       [
         'SELECT a.submission_id, a.question_idx, a.part, a.question_text, a.answer_text, a.answer_value, a.other_text,',
-        '       s.full_name, s.email, s.submitted_at',
+        '       s.full_name, s.email, s.submitted_at, s.survey_version',
         'FROM public.cwi_survey_answers AS a',
         'JOIN public.cwi_survey_submissions AS s ON s.id = a.submission_id',
         'WHERE a.submission_id = ANY($1::uuid[])',

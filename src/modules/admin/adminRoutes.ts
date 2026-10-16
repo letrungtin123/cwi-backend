@@ -100,6 +100,12 @@ export function parseReportStatus(value: unknown): ReportStatusFilter | null {
   throw new HttpError(400, 'invalid_report_status_filter', 'reportStatus filter is invalid.')
 }
 
+export function parseSurveyVersion(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  if (/^[0-9]{4}Q[1-4]$/.test(value)) return value
+  throw new HttpError(400, 'invalid_survey_version_filter', 'surveyVersion filter must look like 2026Q4.')
+}
+
 export function parseEmailStatus(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
   if (validEmailStatuses.has(value)) return 'failed' as const
@@ -242,9 +248,9 @@ export function createAdminRouter(
     }
   })
 
-  router.get('/survey-submissions/stats', async (_req, res, next) => {
+  router.get('/survey-submissions/stats', async (req, res, next) => {
     try {
-      const data = await repository.getSubmissionStats()
+      const data = await repository.getSubmissionStats(parseSurveyVersion(req.query.surveyVersion))
       res.json({ data })
     } catch (error) {
       next(error)
@@ -300,6 +306,7 @@ export function createAdminRouter(
         roundtableRegistered: parseRoundtable(req.query.roundtable),
         search: parseSearch(req.query.search),
         status: parseStatus(req.query.status),
+        surveyVersion: parseSurveyVersion(req.query.surveyVersion),
       })
       res.json({ data })
     } catch (error) {
@@ -318,6 +325,7 @@ export function createAdminRouter(
         roundtableRegistered: parseRoundtable(req.query.roundtable),
         search: parseSearch(req.query.search),
         status: parseStatus(req.query.status),
+        surveyVersion: parseSurveyVersion(req.query.surveyVersion),
       })
       res.json({ data })
     } catch (error) {
@@ -338,6 +346,7 @@ export function createAdminRouter(
         roundtableRegistered: parseRoundtable(req.query.roundtable),
         search: parseSearch(req.query.search),
         status: parseStatus(req.query.status),
+        surveyVersion: parseSurveyVersion(req.query.surveyVersion),
       })
       const totalPages = result.totalItems === 0 ? 0 : Math.ceil(result.totalItems / limit)
       res.setHeader('X-API-Deprecated', 'Use /survey-submissions/page and /survey-submissions/:id instead.')

@@ -6,6 +6,7 @@ import {
   OTHER_OPTION,
   PART_ONE_QUESTION_IDXS,
   SURVEY_QUESTION_BY_IDX,
+  SURVEY_VERSION,
   type SurveyQuestion,
   type SurveyQuestionType,
 } from './surveyQuestions.js'
@@ -57,6 +58,7 @@ export type NormalizedSurveySubmission = {
   scores: SurveyScores
   statusNote: string
   submissionStatus: SubmissionStatus
+  surveyVersion: string
 }
 
 const idempotencyKeySchema = z
@@ -70,7 +72,9 @@ const rawAnswerSchema = z
   .object({
     answer: z.union([z.number().int(), z.string().trim().min(1).max(2048)]),
     idx: z.coerce.number().int().min(1).max(24),
-    otherText: z.string().trim().min(1).max(1000).optional(),
+    // CWI AI V3 accepts other_text of 2-500 characters; reject earlier so the
+    // stored submission never produces a report job that is bound to fail.
+    otherText: z.string().trim().min(2).max(500).optional(),
     question: z.string().trim().max(2000).optional(),
   })
   .strict()
@@ -83,9 +87,9 @@ const rawSubmissionSchema = z
     participant: z
       .object({
         email: z.string().trim().email().max(254),
-        fullName: z.string().trim().min(1).max(160),
+        fullName: z.string().trim().min(2).max(160),
         phone: z.string().trim().min(1).max(32),
-        position: z.string().trim().min(1).max(160),
+        position: z.string().trim().min(2).max(150),
       })
       .strict(),
     privacyConsent: z.enum(PRIVACY_CONSENTS),
@@ -101,6 +105,7 @@ const rawSubmissionSchema = z
       .optional(),
     statusNote: z.string().trim().min(1).max(1000).optional(),
     submissionStatus: z.enum(SUBMISSION_STATUSES),
+    surveyVersion: z.string().trim().max(16).optional(),
   })
   .strict()
 
@@ -300,6 +305,16 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
   }
 
   const raw = parsed.data
+
+  // A page opened before a question-set release still holds the previous
+  // edition's questions; reject it instead of storing answers under new text.
+  if (raw.surveyVersion !== SURVEY_VERSION) {
+    validationError('survey_version_mismatch', 'Survey questions are outdated. Reload the page and submit again.', {
+      expectedSurveyVersion: SURVEY_VERSION,
+      receivedSurveyVersion: raw.surveyVersion ?? null,
+    })
+  }
+
   const idempotencyKey = raw.idempotencyKey ?? headerIdempotencyKey
 
   if (raw.idempotencyKey && headerIdempotencyKey && raw.idempotencyKey !== headerIdempotencyKey) {
@@ -368,6 +383,7 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
     scores,
     statusNote: raw.statusNote ? normalizeText(raw.statusNote) : rule.defaultNote,
     submissionStatus: raw.submissionStatus,
+    surveyVersion: SURVEY_VERSION,
   }
 
   return {

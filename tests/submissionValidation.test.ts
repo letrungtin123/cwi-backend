@@ -10,19 +10,19 @@ import { normalizeSurveySubmission } from '../src/modules/survey/submissionValid
 function partOneAnswers() {
   return [
     ...Array.from({ length: 16 }, (_unused, index) => ({ answer: (index % 5) + 1, idx: index + 1 })),
-    { answer: 'Thiếu người kế nhiệm', idx: 17 },
-    { answer: 'Phát triển năng lực quản lý', idx: 18 },
+    { answer: 'Cơ cấu tổ chức cồng kềnh, phản ứng chậm.', idx: 17 },
+    { answer: 'Đưa AI vào quá trình ra quyết định của Ban điều hành.', idx: 18 },
   ]
 }
 
 function allAnswers() {
   return [
     ...partOneAnswers(),
-    { answer: 'Ban điều hành cùng thống nhất trước khi quyết định', idx: 19 },
-    { answer: 'Chuẩn hóa quy trình và cách làm', idx: 20 },
-    { answer: 'Thiếu người đủ năng lực để thay thế', idx: 21 },
-    { answer: 'Khả năng thực thi', idx: 22 },
-    { answer: 'Từ 300 - <1,000 tỷ VND', idx: 23 },
+    { answer: 'Các phòng ban phối hợp chậm chạp, có xu hướng đùn đẩy trách nhiệm.', idx: 19 },
+    { answer: 'Chủ yếu ứng dụng để cắt giảm chi phí và thay thế các tác vụ thủ công.', idx: 20 },
+    { answer: 'Cấu trúc tổ chức hiện tại quá cứng nhắc để tích hợp công nghệ mới.', idx: 21 },
+    { answer: 'Có hệ thống báo cáo nhưng thường chậm trễ, chỉ phản ánh dữ liệu quá khứ.', idx: 22 },
+    { answer: 'Từ 300 - <1000 tỉ VND', idx: 23 },
     { answer: 'https://example.com', idx: 24 },
   ]
 }
@@ -34,6 +34,19 @@ const participant = {
   position: 'HRM',
 }
 
+const surveyVersion = '2026Q4'
+
+function expectHttpErrorCode(run: () => unknown, code: string) {
+  try {
+    run()
+  } catch (error) {
+    expect(error).toBeInstanceOf(HttpError)
+    expect((error as HttpError).code).toBe(code)
+    return
+  }
+  throw new Error(`Expected HttpError ${code}`)
+}
+
 describe('normalizeSurveySubmission', () => {
   it('normalizes part1_only submissions and maps the anonymous report payload', () => {
     const submission = normalizeSurveySubmission(
@@ -42,6 +55,7 @@ describe('normalizeSurveySubmission', () => {
         participant,
         privacyConsent: 'not_applicable',
         submissionStatus: 'part1_only',
+        surveyVersion,
       },
       'survey-key-1',
     )
@@ -52,6 +66,7 @@ describe('normalizeSurveySubmission', () => {
     expect(submission.participant.email).toBe('an@company.com')
     expect(submission.participant.phone).toBe('+84901234567')
     expect(submission.statusNote).toContain('Phần 1')
+    expect(submission.surveyVersion).toBe('2026Q4')
 
     const reportPayload = buildAnonymousReportPayload(submission)
     expect(reportPayload.participant).toEqual({ position: 'HRM' })
@@ -59,26 +74,98 @@ describe('normalizeSurveySubmission', () => {
     expect(reportPayload.delivery_contact).toEqual({ email: 'an@company.com', full_name: 'Nguyễn Văn An' })
     expect(reportPayload.cohort_consent).toBe(false)
     expect(reportPayload.answers).toHaveLength(18)
+    expect(reportPayload.answers[0]).toEqual({
+      answer: 1,
+      idx: 1,
+      question: 'Chúng tôi có đủ năng lực để thích ứng nhanh trước thay đổi của thị trường.',
+    })
   })
 
-  it('preserves the registered Vietnamese label for question 17', () => {
+  it('rejects submissions without the current survey version', () => {
+    const payload = {
+      answers: partOneAnswers(),
+      participant,
+      privacyConsent: 'not_applicable',
+      submissionStatus: 'part1_only',
+    }
+
+    expectHttpErrorCode(() => normalizeSurveySubmission(payload, null), 'survey_version_mismatch')
+    expectHttpErrorCode(() => normalizeSurveySubmission({ ...payload, surveyVersion: '2026Q3' }, null), 'survey_version_mismatch')
+  })
+
+  it('rejects 2026Q3 options that are not part of the 2026Q4 question set', () => {
+    expectHttpErrorCode(
+      () =>
+        normalizeSurveySubmission(
+          {
+            answers: [...partOneAnswers().filter((answer) => answer.idx !== 17), { answer: 'Thiếu người kế nhiệm', idx: 17 }],
+            participant,
+            privacyConsent: 'not_applicable',
+            submissionStatus: 'part1_only',
+            surveyVersion,
+          },
+          null,
+        ),
+      'invalid_mcq_option',
+    )
+  })
+
+  it('sends the registered "Khác." option with its text to the report service', () => {
     const submission = normalizeSurveySubmission(
       {
         answers: [
-          ...partOneAnswers().filter((answer) => answer.idx !== 17),
-          { answer: 'CEO và Nhân sự chưa thống nhất', idx: 17 },
+          ...partOneAnswers().filter((answer) => answer.idx !== 18),
+          { answer: 'Khác.', idx: 18, otherText: '  Đầu tư   hạ tầng dữ liệu  ' },
         ],
         participant,
         privacyConsent: 'not_applicable',
         submissionStatus: 'part1_only',
+        surveyVersion,
       },
-      'survey-key-q17',
+      null,
     )
 
-    const reportPayload = buildAnonymousReportPayload(submission)
-    expect(reportPayload.answers.find((answer) => answer.idx === 17)?.answer).toBe(
-      'CEO và Nhân sự chưa thống nhất',
+    expect(submission.answers.find((answer) => answer.idx === 18)?.otherText).toBe('Đầu tư hạ tầng dữ liệu')
+    expect(buildAnonymousReportPayload(submission).answers.find((answer) => answer.idx === 18)).toEqual({
+      answer: 'Khác.',
+      idx: 18,
+      other_text: 'Đầu tư hạ tầng dữ liệu',
+      question: 'Nếu chỉ được đầu tư vào một ưu tiên duy nhất để xây dựng lực lượng lao động tương lai, anh/chị sẽ chọn điều gì?',
+    })
+  })
+
+  it('rejects other text outside the report service limits', () => {
+    for (const otherText of ['x', 'x'.repeat(501)]) {
+      expectHttpErrorCode(
+        () =>
+          normalizeSurveySubmission(
+            {
+              answers: [...partOneAnswers().filter((answer) => answer.idx !== 17), { answer: 'Khác.', idx: 17, otherText }],
+              participant,
+              privacyConsent: 'not_applicable',
+              submissionStatus: 'part1_only',
+              surveyVersion,
+            },
+            null,
+          ),
+        'invalid_payload',
+      )
+    }
+  })
+
+  it('scores Q1-Q16 on the report service 0-100 scale', () => {
+    const submission = normalizeSurveySubmission(
+      {
+        answers: partOneAnswers().map((answer) => (typeof answer.answer === 'number' ? { ...answer, answer: 3 } : answer)),
+        participant,
+        privacyConsent: 'not_applicable',
+        submissionStatus: 'part1_only',
+        surveyVersion,
+      },
+      null,
     )
+
+    expect(submission.scores).toEqual({ domainScores: [], overallScore: 50, scaleScore: 0 })
   })
 
   it('keeps all 24 answers for part2_refused_privacy submissions', () => {
@@ -88,6 +175,7 @@ describe('normalizeSurveySubmission', () => {
         participant,
         privacyConsent: 'no',
         submissionStatus: 'part2_refused_privacy',
+        surveyVersion,
       },
       null,
     )
@@ -96,6 +184,10 @@ describe('normalizeSurveySubmission', () => {
     expect(submission.part2Completed).toBe(true)
     expect(submission.privacyConsent).toBe('no')
     expect(submission.statusNote).toContain('Không đồng ý')
+
+    const reportJob = buildReportJobRequest(submission)
+    expect(reportJob.providerEndpoint).toBe('/v3/reports/anonymous')
+    expect(reportJob.requestPayload.answers).toHaveLength(18)
   })
 
   it('normalizes full_private_report submissions with roundtable registration', () => {
@@ -110,6 +202,7 @@ describe('normalizeSurveySubmission', () => {
           registered: true,
         },
         submissionStatus: 'full_private_report',
+        surveyVersion,
       },
       null,
     )
@@ -128,12 +221,17 @@ describe('normalizeSurveySubmission', () => {
     expect(reportJob.providerEndpoint).toBe('/v3/reports/personalized')
     expect(reportJob.reportType).toBe('personalized')
     expect(reportJob.requestPayload.answers).toHaveLength(24)
-    expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 24)?.answer).toBe('https://example.com')
+    expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 24)).toEqual({
+      answer: 'https://example.com',
+      idx: 24,
+      question: 'Website chính thức của công ty',
+    })
     expect(reportJob.requestPayload.cohort_consent).toBe(true)
-    expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 23)?.answer).toBe('Từ 300 - <1,000 tỷ VND')
-    expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 2)?.question).toContain('của chúng tôi')
-    expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 6)?.question).toContain('Hệ năng lực')
-    expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 14)?.question).toContain('Giám đốc nhân sự')
+    expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 23)).toEqual({
+      answer: 'Từ 300 - <1000 tỉ VND',
+      idx: 23,
+      question: 'Quy mô doanh thu của công ty hiện nay:',
+    })
   })
 
   it('rejects a Roundtable email that does not match the participant email', () => {
@@ -149,6 +247,7 @@ describe('normalizeSurveySubmission', () => {
             registered: true,
           },
           submissionStatus: 'full_private_report',
+          surveyVersion,
         },
         null,
       ),
@@ -163,6 +262,7 @@ describe('normalizeSurveySubmission', () => {
           participant,
           privacyConsent: 'not_applicable',
           submissionStatus: 'part1_only',
+          surveyVersion,
         },
         null,
       ),
@@ -177,6 +277,7 @@ describe('normalizeSurveySubmission', () => {
           participant,
           privacyConsent: 'yes',
           submissionStatus: 'part2_refused_privacy',
+          surveyVersion,
         },
         null,
       ),
@@ -189,6 +290,7 @@ describe('normalizeSurveySubmission', () => {
       participant: { ...participant, phone: '123' },
       privacyConsent: 'not_applicable',
       submissionStatus: 'part1_only',
+      surveyVersion,
     }, null)).toThrow(HttpError)
   })
 })
