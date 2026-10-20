@@ -16,6 +16,7 @@ const registration = {
   linked_submitted_at: null,
   phone: '+84901234567',
   position: 'CEO',
+  quarter: null,
   registered_at: new Date('2026-10-20T00:00:00.000Z'),
   speaker_question: 'CEO nên bắt đầu từ đâu?',
 }
@@ -33,14 +34,19 @@ describe('event registration export columns', () => {
     expect(values[headers.indexOf('Tình trạng')]).toBe('Đăng ký riêng')
   })
 
-  it('keeps the Roundtable layout without Webinar-only columns', () => {
+  it('exports the Roundtable quarter, phone and company without the Webinar question', () => {
     const { headers, widths } = eventRegistrationColumns('roundtable')
-    const values = buildEventRegistrationValues('roundtable', { ...registration, company_name: null, phone: null, speaker_question: null })
+    const values = buildEventRegistrationValues('roundtable', { ...registration, quarter: '2026Q4', speaker_question: null })
 
-    expect(headers).not.toContain('Công ty')
+    expect(headers).not.toContain('Câu hỏi cho diễn giả')
     expect(values).toHaveLength(headers.length)
     expect(widths).toHaveLength(headers.length)
-    expect(values.slice(0, 4)).toEqual(['Nguyễn Văn An', 'an@company.com', 'CEO', 'Đăng ký riêng'])
+    expect(values.slice(0, 7)).toEqual(['2026Q4', 'Nguyễn Văn An', 'an@company.com', '+84901234567', 'CEO', 'Công ty CWI', 'Đăng ký riêng'])
+  })
+
+  it('leaves contact cells empty for older Roundtable registrations', () => {
+    const values = buildEventRegistrationValues('roundtable', { ...registration, company_name: null, phone: null, quarter: '2026Q3', speaker_question: null })
+    expect(values.slice(0, 6)).toEqual(['2026Q3', 'Nguyễn Văn An', 'an@company.com', '', 'CEO', ''])
   })
 })
 

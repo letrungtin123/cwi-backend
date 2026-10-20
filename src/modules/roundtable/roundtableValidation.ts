@@ -1,19 +1,28 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { HttpError } from '../../http/errors.js'
+import { CURRENT_ROUNDTABLE_QUARTER } from './roundtableQuarter.js'
 
 export type NormalizedRoundtableRegistration = {
   clientMeta: Record<string, unknown>
+  companyName: string
   email: string
   fullName: string
   idempotencyKey: string | null
   payloadHash: string
+  phone: string
   position: string | null
+  quarter: string
   surveySubmissionIdempotencyKey: string | null
 }
 
 export type NormalizedRoundtableEmailCheck = {
   email: string
+}
+
+export type NormalizedRoundtableEventUpdate = {
+  eventLocation: string
+  eventTime: string
 }
 
 const idempotencyKeySchema = z
@@ -26,9 +35,11 @@ const idempotencyKeySchema = z
 const rawRoundtableRegistrationSchema = z
   .object({
     clientMeta: z.record(z.string(), z.unknown()).optional(),
+    companyName: z.string().trim().min(1).max(200),
     email: z.string().trim().email().max(254),
     fullName: z.string().trim().min(1).max(160),
     idempotencyKey: idempotencyKeySchema.optional(),
+    phone: z.string().trim().min(8).max(32),
     position: z.string().trim().min(1).max(160).optional(),
     surveySubmissionIdempotencyKey: idempotencyKeySchema.optional(),
   })
@@ -37,6 +48,13 @@ const rawRoundtableRegistrationSchema = z
 const rawRoundtableEmailCheckSchema = z
   .object({
     email: z.string().trim().email().max(254),
+  })
+  .strict()
+
+const rawRoundtableEventUpdateSchema = z
+  .object({
+    eventLocation: z.string().trim().min(1).max(300),
+    eventTime: z.string().trim().min(1).max(300),
   })
   .strict()
 
@@ -50,6 +68,18 @@ function normalizeEmail(value: string) {
 
 function normalizeText(value: string) {
   return value.trim().replace(/\s+/g, ' ')
+}
+
+// Same canonical form as the survey phone so both tables can be matched.
+function normalizePhone(value: string) {
+  const compact = value.trim().replace(/[\s().-]/g, '')
+
+  if (/^0\d{9,10}$/.test(compact)) return `+84${compact.slice(1)}`
+  if (/^\+[1-9]\d{7,14}$/.test(compact)) return compact
+
+  validationError('invalid_roundtable_phone', 'Số điện thoại không hợp lệ.', {
+    acceptedFormats: ['0901234567', '+84901234567'],
+  })
 }
 
 function hashPayload(value: Omit<NormalizedRoundtableRegistration, 'payloadHash'>) {
@@ -84,10 +114,13 @@ export function normalizeRoundtableRegistration(payload: unknown, headerIdempote
 
   const normalizedWithoutHash: Omit<NormalizedRoundtableRegistration, 'payloadHash'> = {
     clientMeta: raw.clientMeta ?? {},
+    companyName: normalizeText(raw.companyName),
     email: normalizeEmail(raw.email),
     fullName: normalizeText(raw.fullName),
     idempotencyKey: idempotencyKey ?? null,
+    phone: normalizePhone(raw.phone),
     position: raw.position ? normalizeText(raw.position) : null,
+    quarter: CURRENT_ROUNDTABLE_QUARTER,
     surveySubmissionIdempotencyKey: raw.surveySubmissionIdempotencyKey ?? null,
   }
 
@@ -105,4 +138,17 @@ export function normalizeRoundtableEmailCheck(payload: unknown): NormalizedRound
   }
 
   return { email: normalizeEmail(parsed.data.email) }
+}
+
+export function normalizeRoundtableEventUpdate(payload: unknown): NormalizedRoundtableEventUpdate {
+  const parsed = rawRoundtableEventUpdateSchema.safeParse(payload)
+
+  if (!parsed.success) {
+    validationError('invalid_roundtable_event', 'Thời gian và Địa điểm là bắt buộc (tối đa 300 ký tự).')
+  }
+
+  return {
+    eventLocation: normalizeText(parsed.data.eventLocation),
+    eventTime: normalizeText(parsed.data.eventTime),
+  }
 }

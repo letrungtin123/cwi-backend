@@ -22,7 +22,7 @@ import type { PgReportDeliveryRepository } from './modules/reportDelivery/report
 import type { SmtpReportMailer } from './modules/reportDelivery/smtpMailer.js'
 import type { PgReportRepository } from './modules/reports/reportRepository.js'
 import { createPublicReportRouter } from './modules/reports/publicReportRoutes.js'
-import { createRoundtableRouter } from './modules/roundtable/roundtableRoutes.js'
+import { createRoundtableEventAdminRouter, createRoundtableRouter } from './modules/roundtable/roundtableRoutes.js'
 import type { RoundtableService } from './modules/roundtable/roundtableService.js'
 import { createSurveyRouter } from './modules/survey/surveyRoutes.js'
 import type { SurveyService } from './modules/survey/surveyService.js'
@@ -169,6 +169,7 @@ export function createApp(dependencies: AppDependencies) {
   app.use('/api/v1/admin', createAdminRouter(adminRepository, reportRepository, reportAssetStorage, exportRepository, authService, config))
   app.use('/api/v1/admin/report-delivery', createReportDeliveryRouter(reportDeliveryRepository, submissionReportStorage, reportAssetStorage, reportMailer, authService, config))
   app.use('/api/v1/admin/quarterly-reports', createQuarterlyReportAdminRouter(quarterlyReportRepository, quarterlyReportStorage, authService, config))
+  app.use('/api/v1/admin/roundtable-event', createRoundtableEventAdminRouter(roundtableService, authService, config))
   app.use(handleNotFound)
   app.use(handleError(logger))
   return app

@@ -168,6 +168,7 @@ function addOverview(workbook: ExcelJS.stream.xlsx.WorkbookWriter, job: ClaimedE
     ['Thời gian tạo', job.created_at],
     ['Trạng thái lọc', filters.status ? statusLabel(filters.status) : 'Tất cả trạng thái'],
     ...(job.dataset === 'submissions' ? [['Quý khảo sát', filters.surveyVersion ?? 'Tất cả quý'] as CellValue[]] : []),
+    ...(job.dataset === 'roundtable' ? [['Quý Roundtable', filters.quarter ?? 'Tất cả quý'] as CellValue[]] : []),
     ...(job.dataset === 'submissions' ? [['Đăng ký Roundtable', filters.roundtableRegistered === undefined ? 'Tất cả' : yesNo(filters.roundtableRegistered)] as CellValue[]] : []),
     ['Tình trạng liên kết', filters.linkStatus === undefined ? 'Tất cả' : filters.linkStatus === 'linked' ? 'Đã khảo sát' : 'Đăng ký riêng'],
     ['Từ khóa tìm kiếm', filters.search ? sanitizeExcelCell(filters.search) : 'Không lọc'],
@@ -182,6 +183,7 @@ function addOverview(workbook: ExcelJS.stream.xlsx.WorkbookWriter, job: ClaimedE
 
 function buildSubmissionValues(row: {
   answers_count: number
+  company_name: string | null
   email: string
   full_name: string
   part1_completed: boolean
@@ -201,6 +203,7 @@ function buildSubmissionValues(row: {
     row.full_name,
     row.email,
     row.phone ?? '',
+    row.company_name ?? '',
     row.position,
     statusLabel(row.submission_status),
     row.status_note,
@@ -219,8 +222,8 @@ type EventRegistrationDataset = Exclude<ExportDataset, 'submissions'>
 const linkedSubmissionHeaders = ['Tình trạng', 'Thời gian đăng ký', 'Trạng thái khảo sát', 'Trạng thái báo cáo', 'Họ tên trong khảo sát', 'Email trong khảo sát', 'Chức vụ trong khảo sát', 'Số câu trả lời', 'Bảo mật dữ liệu', 'Thời gian gửi khảo sát']
 const linkedSubmissionWidths = [18, 20, 34, 22, 24, 30, 24, 15, 18, 22]
 
-// Webinar registrations also collect phone, company and a speaker question;
-// Roundtable registrations do not, so their sheet keeps the shorter layout.
+// Both registration types collect phone and company (empty for older
+// Roundtable rows). Roundtable adds its quarter; Webinar adds a speaker question.
 export function eventRegistrationColumns(dataset: EventRegistrationDataset) {
   if (dataset === 'webinar') {
     return {
@@ -229,8 +232,8 @@ export function eventRegistrationColumns(dataset: EventRegistrationDataset) {
     }
   }
   return {
-    headers: ['Họ tên', 'Email', 'Chức vụ', ...linkedSubmissionHeaders],
-    widths: [24, 30, 24, ...linkedSubmissionWidths],
+    headers: ['Quý Roundtable', 'Họ tên', 'Email', 'Số điện thoại', 'Chức vụ', 'Công ty', ...linkedSubmissionHeaders],
+    widths: [16, 24, 30, 18, 24, 30, ...linkedSubmissionWidths],
   }
 }
 
@@ -249,12 +252,13 @@ export function buildEventRegistrationValues(dataset: EventRegistrationDataset, 
   linked_submitted_at: Date | null
   phone: string | null
   position: string | null
+  quarter: string | null
   registered_at: Date
   speaker_question: string | null
 }) {
   const contact = dataset === 'webinar'
     ? [row.full_name, row.email, row.phone ?? '', row.position ?? '', row.company_name ?? '', row.speaker_question ?? '']
-    : [row.full_name, row.email, row.position ?? '']
+    : [row.quarter ?? '', row.full_name, row.email, row.phone ?? '', row.position ?? '', row.company_name ?? '']
   return [
     ...contact,
     row.linked_submission_id ? 'Đã khảo sát' : 'Đăng ký riêng',
@@ -299,8 +303,8 @@ export class ExportWorkbookService {
       const eventColumns = job.dataset === 'submissions' ? null : eventRegistrationColumns(job.dataset)
       const primaryHeaders = eventColumns
         ? eventColumns.headers
-        : ['Quý khảo sát', 'Họ tên', 'Email', 'Số điện thoại', 'Chức vụ', 'Trạng thái khảo sát', 'Ghi chú trạng thái', 'Bảo mật dữ liệu', 'Đã trả lời Phần 1', 'Đã trả lời Phần 2', 'Số câu trả lời', 'Đăng ký Roundtable', 'Trạng thái báo cáo', 'Thời gian gửi']
-      const primaryWidths = eventColumns ? eventColumns.widths : [14, 24, 30, 18, 24, 34, 38, 18, 18, 18, 15, 20, 22, 20]
+        : ['Quý khảo sát', 'Họ tên', 'Email', 'Số điện thoại', 'Tên công ty', 'Chức vụ', 'Trạng thái khảo sát', 'Ghi chú trạng thái', 'Bảo mật dữ liệu', 'Đã trả lời Phần 1', 'Đã trả lời Phần 2', 'Số câu trả lời', 'Đăng ký Roundtable', 'Trạng thái báo cáo', 'Thời gian gửi']
+      const primaryWidths = eventColumns ? eventColumns.widths : [14, 24, 30, 18, 30, 24, 34, 38, 18, 18, 18, 15, 20, 22, 20]
       const primarySheet = createSheetWriter(workbook, job.dataset === 'submissions' ? 'Lượt gửi khảo sát' : `Đăng ký ${registrationLabel}`, primaryHeaders, primaryWidths)
       const answerSheet =
         job.dataset === 'submissions'

@@ -155,11 +155,12 @@ export class PgSurveyRepository implements SurveyRepository {
           client_ip_hash,
           user_agent,
           client_meta,
-          survey_version
+          survey_version,
+          company_name
         )
         VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-          $12, $13, $14::jsonb, $15, $16, $17, $18, $19, $20::jsonb, $21
+          $12, $13, $14::jsonb, $15, $16, $17, $18, $19, $20::jsonb, $21, $22
         )
         RETURNING id, submitted_at
         `,
@@ -185,6 +186,7 @@ export class PgSurveyRepository implements SurveyRepository {
           meta.userAgent,
           JSON.stringify(input.clientMeta),
           input.surveyVersion,
+          input.participant.companyName,
         ],
       )
 
@@ -219,12 +221,17 @@ export class PgSurveyRepository implements SurveyRepository {
         if (!explicitRoundtable || explicitRoundtable.email.trim().toLowerCase() !== input.participant.email) {
           throw new HttpError(409, 'roundtable_survey_email_mismatch', 'Roundtable registration must match the survey email.')
         }
+        if (explicitRoundtable.quarter !== input.surveyVersion) {
+          throw new HttpError(409, 'roundtable_quarter_mismatch', 'Roundtable registration belongs to another quarter.')
+        }
       }
 
-      const existingRoundtable = explicitRoundtable ?? await findRoundtableByEmail(client, input.participant.email)
+      // Roundtable registrations are per quarter: link only the registration of
+      // this submission's quarter, never one from an earlier Roundtable.
+      const existingRoundtable = explicitRoundtable ?? await findRoundtableByEmail(client, input.participant.email, input.surveyVersion)
       if (existingRoundtable) {
         await linkRoundtableIfUnlinked(client, existingRoundtable, submission.id)
-        await syncSurveyRoundtableFlags(client, input.participant.email)
+        await syncSurveyRoundtableFlags(client, input.participant.email, input.surveyVersion)
       } else if (input.roundtableRegistration) {
         await client.query(
           `
@@ -238,9 +245,12 @@ export class PgSurveyRepository implements SurveyRepository {
             client_ip_hash,
             user_agent,
             client_meta,
-            linked_at
+            linked_at,
+            quarter,
+            phone,
+            company_name
           )
-          VALUES ($1, true, $2, $3, $4, $5, $6, $7, $8::jsonb, now())
+          VALUES ($1, true, $2, $3, $4, $5, $6, $7, $8::jsonb, now(), $9, $10, $11)
           `,
           [
             submission.id,
@@ -251,9 +261,12 @@ export class PgSurveyRepository implements SurveyRepository {
             meta.clientIpHash,
             meta.userAgent,
             JSON.stringify(input.clientMeta),
+            input.surveyVersion,
+            input.participant.phone,
+            input.participant.companyName,
           ],
         )
-        await syncSurveyRoundtableFlags(client, input.participant.email)
+        await syncSurveyRoundtableFlags(client, input.participant.email, input.surveyVersion)
       }
 
       const existingWebinar = await findWebinarByEmail(client, input.participant.email)

@@ -5,6 +5,7 @@ export const exportDatasetSchema = z.enum(['submissions', 'roundtable', 'webinar
 export const exportFiltersSchema = z
   .object({
     linkStatus: z.enum(['linked', 'standalone']).optional(),
+    quarter: z.string().regex(/^[0-9]{4}Q[1-4]$/).optional(),
     roundtableRegistered: z.boolean().optional(),
     search: z.string().trim().max(120).optional(),
     status: z.enum(['part1_only', 'part2_refused_privacy', 'full_private_report']).optional(),

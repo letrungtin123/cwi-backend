@@ -4,6 +4,7 @@ import { PgAdminRepository } from '../src/modules/admin/adminRepository.js'
 
 const submissionRow = {
   answers_count: 0,
+  company_name: 'Công ty CWI',
   email: 'user@example.com',
   full_name: 'Nguyễn Văn A',
   id: '2c78db0b-e97e-49ca-8a9a-2565077f0ffd',

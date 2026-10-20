@@ -4,6 +4,7 @@ import type { ExportDataset, ExportFilters, ExportJob, ExportJobRow, ClaimedExpo
 
 type SubmissionExportRow = {
   answers_count: number
+  company_name: string | null
   email: string
   full_name: string
   part1_completed: boolean
@@ -51,6 +52,7 @@ type RoundtableExportRow = {
   company_name: string | null
   phone: string | null
   position: string | null
+  quarter: string | null
   registered_at: Date
   speaker_question: string | null
 }
@@ -247,7 +249,7 @@ export class PgExportRepository {
     params.push(batchSize + 1)
     const result = await this.pool.query<SubmissionExportRow>(
       [
-        'SELECT s.id, s.full_name, s.email, s.phone, s.position, s.submission_status, s.status_note, s.privacy_consent,',
+        'SELECT s.id, s.full_name, s.email, s.phone, s.company_name, s.position, s.submission_status, s.status_note, s.privacy_consent,',
         '       s.part1_completed, s.part2_completed, s.answers_count, s.roundtable_registered, s.submitted_at,',
         '       s.survey_version, report.status AS report_status',
         'FROM public.cwi_survey_submissions AS s',
@@ -319,16 +321,23 @@ export class PgExportRepository {
       params.push(cursor.timestamp, cursor.id)
       where.push('(r.registered_at, r.id) < ($2::timestamptz, $3::uuid)')
     }
+    const isRoundtable = table === 'cwi_roundtable_registrations'
     if (filters.linkStatus === 'linked') where.push('r.submission_id IS NOT NULL')
     if (filters.linkStatus === 'standalone') where.push('r.submission_id IS NULL')
+    if (isRoundtable && filters.quarter) {
+      params.push(filters.quarter)
+      where.push('r.quarter = $' + params.length)
+    }
     if (filters.search) {
       params.push('%' + filters.search + '%')
-      where.push('(r.full_name ILIKE $' + params.length + ' OR r.email ILIKE $' + params.length + ' OR r.position ILIKE $' + params.length + ' OR s.full_name ILIKE $' + params.length + ' OR s.email ILIKE $' + params.length + ' OR s.position ILIKE $' + params.length + ' OR s.phone ILIKE $' + params.length + ')')
+      // Mirrors the dashboard list search of each registration type.
+      const registrationContact = isRoundtable ? ' OR r.phone ILIKE $' + params.length + ' OR r.company_name ILIKE $' + params.length : ''
+      where.push('(r.full_name ILIKE $' + params.length + ' OR r.email ILIKE $' + params.length + ' OR r.position ILIKE $' + params.length + registrationContact + ' OR s.full_name ILIKE $' + params.length + ' OR s.email ILIKE $' + params.length + ' OR s.position ILIKE $' + params.length + ' OR s.phone ILIKE $' + params.length + ')')
     }
-    // Only Webinar registrations collect phone, company and a speaker question.
-    const contactColumns = table === 'cwi_webinar_registrations'
-      ? 'r.phone, r.company_name, r.speaker_question,'
-      : 'NULL::text AS phone, NULL::text AS company_name, NULL::text AS speaker_question,'
+    // Roundtable registrations have a quarter; only Webinar asks a speaker question.
+    const contactColumns = isRoundtable
+      ? 'r.phone, r.company_name, NULL::text AS speaker_question, r.quarter,'
+      : 'r.phone, r.company_name, r.speaker_question, NULL::text AS quarter,'
     params.push(batchSize + 1)
     const result = await this.pool.query<RoundtableExportRow>(
       [
