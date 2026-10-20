@@ -27,7 +27,7 @@ const personalizedContent: ReportEmailContent = {
   paragraphs: [
     'Thay mặt Ban tổ chức CEO Workforce Index (CWI), tôi xin trân trọng cảm ơn quý Anh/Chị đã dành thời gian hoàn thành khảo sát trong mùa đầu tiên của CEO Workforce Index.',
     'Sự tham gia của quý Anh/Chị không chỉ mang lại những góc nhìn và thông tin thực tế, hữu dụng và những khuyến nghị hành động cụ thể cho chính công ty mình; mà còn là đóng góp đáng quý vào bộ dữ liệu đối chuẩn đầu tiên về "Hệ cộng lực" (workforce plus) cho cộng đồng doanh nghiệp tại Việt Nam. Đây là những phép đo và biện pháp để nâng cao năng lực thực thi tích hợp gồm con người, AI, tự động hóa, hệ sinh thái để đáp ứng kỳ vọng tăng trưởng cho doanh nghiệp tại Việt Nam.',
-    'Từ những thông tin Quý Anh/Chị đã chia sẻ, CWI xin trân trọng gửi Báo cáo dành riêng cho doanh nghiệp, nhằm hỗ trợ Anh/Chị nhìn sâu hơn và có hành động ưu tiên trong 90 ngày tới về "Năng lực lãnh đạo cho tăng trưởng" - một trong bốn chủ điểm chính của "Hệ cộng lực".',
+    'Từ những thông tin Quý Anh/Chị đã chia sẻ, CWI xin trân trọng gửi Báo cáo dành riêng cho doanh nghiệp, nhằm hỗ trợ Anh/Chị nhìn sâu hơn và có hành động ưu tiên trong 90 ngày tới về "Nhân lực sẵn sàng cho tương lai" - một trong bốn chủ điểm chính của "Hệ cộng lực".',
   ],
   listIntro: 'Vui lòng xem Báo cáo đính kèm trong email này, với cam kết cao về tính độc lập và bảo mật thông tin, hy vọng giúp Anh/Chị:',
   listItems: [
@@ -50,7 +50,7 @@ const anonymousContent: ReportEmailContent = {
     'Thay mặt Ban Tổ chức CEO Workforce Index (CWI), tôi xin trân trọng cảm ơn Quý Anh/Chị đã dành thời gian hoàn thành khảo sát trong mùa đầu tiên của CEO Workforce Index.',
     'Sự tham gia của Quý Anh/Chị không chỉ mang lại những góc nhìn và thông tin thực tế, hữu dụng, cùng những khuyến nghị hành động cụ thể cho doanh nghiệp; mà còn là đóng góp đáng quý vào bộ dữ liệu đối chuẩn đầu tiên về “Hệ cộng lực” (Workforce Plus) cho cộng đồng doanh nghiệp tại Việt Nam. Đây là những phép đo và biện pháp nhằm nâng cao năng lực thực thi tích hợp giữa con người, AI, tự động hóa và hệ sinh thái, qua đó hỗ trợ doanh nghiệp đáp ứng các kỳ vọng tăng trưởng trong bối cảnh mới.',
     'Theo lựa chọn không chia sẻ thông tin của Quý Anh/Chị khi tham gia khảo sát, Chương trình chỉ ghi nhận và xử lý phần dữ liệu khảo sát ở chế độ khuyết danh. Nếu muốn nhận báo cáo toàn phần, Anh/Chị vui lòng làm cả hai phần khảo sát và chọn "đồng ý" cho CEO Workforce Index xử lý thông tin cá nhân phục vụ mục đích của Chương trình.',
-    'Từ những thông tin Quý Anh/Chị đã chia sẻ, CWI xin trân trọng gửi Báo cáo kết quả khảo sát khuyết danh, nhằm hỗ trợ Anh/Chị có thêm góc nhìn về “Năng lực lãnh đạo cho tăng trưởng” – một trong bốn chủ điểm chính của “Hệ cộng lực”.',
+    'Từ những thông tin Quý Anh/Chị đã chia sẻ, CWI xin trân trọng gửi Báo cáo kết quả khảo sát khuyết danh, nhằm hỗ trợ Anh/Chị có thêm góc nhìn về “Nhân lực sẵn sàng cho tương lai” – một trong bốn chủ điểm chính của “Hệ cộng lực”.',
   ],
   listIntro: 'Vui lòng xem Báo cáo đính kèm trong email này. Với cam kết cao về tính độc lập và bảo mật thông tin, CWI hy vọng báo cáo sẽ hỗ trợ Anh/Chị:',
   listItems: [
