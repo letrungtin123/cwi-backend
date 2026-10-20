@@ -106,6 +106,12 @@ export function parseSurveyVersion(value: unknown) {
   throw new HttpError(400, 'invalid_survey_version_filter', 'surveyVersion filter must look like 2026Q4.')
 }
 
+export function parseQuarter(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  if (/^[0-9]{4}Q[1-4]$/.test(value)) return value
+  throw new HttpError(400, 'invalid_quarter_filter', 'quarter filter must look like 2026Q4.')
+}
+
 export function parseEmailStatus(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
   if (validEmailStatuses.has(value)) return 'failed' as const
@@ -152,9 +158,9 @@ export function createAdminRouter(
   router.use(createAdminRequestRateLimit(config))
   router.use('/exports', createExportRouter(exportRepository, reportAssetStorage, config))
 
-  router.get('/roundtable-registrations/stats', async (_req, res, next) => {
+  router.get('/roundtable-registrations/stats', async (req, res, next) => {
     try {
-      const data = await repository.getRoundtableRegistrationStats()
+      const data = await repository.getRoundtableRegistrationStats(parseQuarter(req.query.quarter))
       res.json({ data })
     } catch (error) {
       next(error)
@@ -168,6 +174,7 @@ export function createAdminRouter(
         ...cursor,
         limit: parseLimit(req.query.limit),
         linkStatus: parseRoundtableLinkStatus(req.query.linkStatus),
+        quarter: parseQuarter(req.query.quarter),
         search: parseSearch(req.query.search),
       })
       res.json({ data })
@@ -182,6 +189,7 @@ export function createAdminRouter(
         ...parsePaginationCursor(req.query.cursor, req.query.before, req.query.beforeId, config.adminCursorSecret),
         limit: parseLimit(req.query.limit),
         linkStatus: parseRoundtableLinkStatus(req.query.linkStatus),
+        quarter: parseQuarter(req.query.quarter),
         search: parseSearch(req.query.search),
       })
       res.json({ data })

@@ -20,6 +20,7 @@ import {
 import { getSurveyScores, type SurveyScores } from './surveyScoring.js'
 
 export type Participant = {
+  companyName: string | null
   email: string
   fullName: string
   phone: string
@@ -86,6 +87,9 @@ const rawSubmissionSchema = z
     idempotencyKey: idempotencyKeySchema.optional(),
     participant: z
       .object({
+        // Required by the landing form; optional here so a page opened before
+        // the field existed can still submit during a release.
+        companyName: z.string().trim().min(1).max(200).optional(),
         email: z.string().trim().email().max(254),
         fullName: z.string().trim().min(2).max(160),
         phone: z.string().trim().min(1).max(32),
@@ -373,6 +377,7 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
     part1Completed: true,
     part2Completed: rule.requiredPart === 'all',
     participant: {
+      companyName: raw.participant.companyName ? normalizeText(raw.participant.companyName) : null,
       email: participantEmail,
       fullName: normalizeText(raw.participant.fullName),
       phone: normalizePhone(raw.participant.phone),

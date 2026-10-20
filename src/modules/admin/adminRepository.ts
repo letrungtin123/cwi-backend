@@ -16,6 +16,7 @@ export type ReportStatusFilter = 'not_started' | 'generating' | 'completed' | 'f
 
 export type SubmissionListItem = {
   answersCount: number
+  companyName: string | null
   email: string
   fullName: string
   id: string
@@ -76,6 +77,7 @@ export type SubmissionDetailListResult = {
 
 type SubmissionRow = {
   answers_count: number
+  company_name: string | null
   email: string
   full_name: string
   id: string
@@ -170,6 +172,8 @@ export type RoundtableRegistrationListItem = {
   linkedSubmission: RoundtableSubmissionSummary | null
   phone: string | null
   position: string | null
+  // Roundtable quarter; null for Webinar registrations.
+  quarter: string | null
   registeredAt: string
   source: string
   speakerQuestion: string | null
@@ -186,11 +190,15 @@ export type RoundtableRegistrationFilters = {
   beforeId: string | null
   limit: number
   linkStatus: RoundtableLinkStatus | null
+  // Applied to Roundtable only; Webinar registrations have no quarter.
+  quarter?: string | null
   search: string | null
 }
 
 export type RoundtableRegistrationStats = {
   linkedSubmissions: number
+  // Roundtable only: every quarter with registrations, newest first.
+  quarters?: Array<{ quarter: string; totalRegistrations: number }>
   standaloneRegistrations: number
   todayRegistrations: number
   totalRegistrations: number
@@ -219,6 +227,7 @@ type RoundtableRegistrationRow = {
   id: string
   position: string | null
   phone: string | null
+  quarter: string | null
   registered_at: Date
   speaker_question: string | null
   report_job_id: string | null
@@ -262,6 +271,7 @@ const submissionSelect = `
     s.full_name,
     s.email,
     s.phone,
+    s.company_name,
     s.position,
     s.privacy_consent,
     s.part1_completed,
@@ -294,10 +304,11 @@ const roundtableSelect = `
   SELECT
     r.id,
     r.full_name,
-    NULL::text AS company_name,
+    r.company_name,
     r.email,
-    NULL::text AS phone,
+    r.phone,
     NULL::text AS speaker_question,
+    r.quarter,
     r.position,
     r.registered_at,
     r.source,
@@ -330,9 +341,8 @@ const roundtableSelect = `
 `
 
 const webinarSelect = roundtableSelect
-  .replace('NULL::text AS company_name', 'r.company_name')
-  .replace('NULL::text AS phone', 'r.phone')
   .replace('NULL::text AS speaker_question', 'r.speaker_question')
+  .replace('r.quarter,', 'NULL::text AS quarter,')
   .replace('public.cwi_roundtable_registrations', 'public.cwi_webinar_registrations')
 
 function toIso(value: Date) {
@@ -403,6 +413,7 @@ function mapReportSummary(row: SubmissionRow): ReportSummary {
 function mapListItem(row: SubmissionRow): SubmissionListItem {
   return {
     answersCount: row.answers_count,
+    companyName: row.company_name,
     email: row.email,
     fullName: row.full_name,
     id: row.id,
@@ -507,6 +518,7 @@ function mapRoundtableRegistration(row: RoundtableRegistrationRow): RoundtableRe
     linkedSubmission: mapRoundtableLinkedSubmission(row),
     phone: row.phone,
     position: row.position,
+    quarter: row.quarter,
     registeredAt: toIso(row.registered_at),
     source: row.source,
     speakerQuestion: row.speaker_question,
@@ -604,7 +616,7 @@ function appendSubmissionDetailFilters(
 }
 
 export class PgAdminRepository {
-  private roundtableStatsCache: TimedCache<RoundtableRegistrationStats> | null = null
+  private readonly roundtableStatsCache = new Map<string, TimedCache<RoundtableRegistrationStats>>()
   private webinarStatsCache: TimedCache<WebinarRegistrationStats> | null = null
   private readonly submissionStatsCache = new Map<string, TimedCache<SubmissionStats>>()
 
@@ -640,12 +652,19 @@ export class PgAdminRepository {
       where.push('r.submission_id IS NULL')
     }
 
+    if (filters.quarter) {
+      params.push(filters.quarter)
+      where.push('r.quarter = $' + params.length)
+    }
+
     if (filters.search) {
       params.push('%' + filters.search + '%')
       where.push(
         '(r.full_name ILIKE $' + params.length +
           ' OR r.email ILIKE $' + params.length +
           ' OR r.position ILIKE $' + params.length +
+          ' OR r.phone ILIKE $' + params.length +
+          ' OR r.company_name ILIKE $' + params.length +
           ' OR s.full_name ILIKE $' + params.length +
           ' OR s.email ILIKE $' + params.length +
           ' OR s.position ILIKE $' + params.length +
@@ -677,28 +696,43 @@ export class PgAdminRepository {
     return page.items
   }
 
-  async getRoundtableRegistrationStats(): Promise<RoundtableRegistrationStats> {
-    if (this.roundtableStatsCache && this.roundtableStatsCache.expiresAt > Date.now()) return this.roundtableStatsCache.value
+  async getRoundtableRegistrationStats(quarter: string | null = null): Promise<RoundtableRegistrationStats> {
+    const cacheKey = quarter ?? 'all'
+    const cached = this.roundtableStatsCache.get(cacheKey)
+    if (cached && cached.expiresAt > Date.now()) return cached.value
 
-    const result = await this.pool.query<RoundtableStatsRow>(
-      `
-      SELECT
-        count(*)::text AS total_registrations,
-        count(*) FILTER (WHERE submission_id IS NOT NULL)::text AS linked_submissions,
-        count(*) FILTER (WHERE submission_id IS NULL)::text AS standalone_registrations,
-        count(*) FILTER (WHERE registered_at >= date_trunc('day', now()))::text AS today_registrations
-      FROM public.cwi_roundtable_registrations
-      `,
-    )
+    const [result, quartersResult] = await Promise.all([
+      this.pool.query<RoundtableStatsRow>(
+        `
+        SELECT
+          count(*)::text AS total_registrations,
+          count(*) FILTER (WHERE submission_id IS NOT NULL)::text AS linked_submissions,
+          count(*) FILTER (WHERE submission_id IS NULL)::text AS standalone_registrations,
+          count(*) FILTER (WHERE registered_at >= date_trunc('day', now()))::text AS today_registrations
+        FROM public.cwi_roundtable_registrations
+        WHERE $1::text IS NULL OR quarter = $1
+        `,
+        [quarter],
+      ),
+      this.pool.query<{ quarter: string; total_registrations: string }>(
+        `
+        SELECT quarter, count(*)::text AS total_registrations
+        FROM public.cwi_roundtable_registrations
+        GROUP BY quarter
+        ORDER BY quarter DESC
+        `,
+      ),
+    ])
 
     const row = result.rows[0]
     const value = {
       linkedSubmissions: toNumber(row?.linked_submissions ?? null),
+      quarters: quartersResult.rows.map((item) => ({ quarter: item.quarter, totalRegistrations: toNumber(item.total_registrations) })),
       standaloneRegistrations: toNumber(row?.standalone_registrations ?? null),
       todayRegistrations: toNumber(row?.today_registrations ?? null),
       totalRegistrations: toNumber(row?.total_registrations ?? null),
     }
-    this.roundtableStatsCache = { expiresAt: Date.now() + statsCacheTtlMs, value }
+    this.roundtableStatsCache.set(cacheKey, { expiresAt: Date.now() + statsCacheTtlMs, value })
     return value
   }
 

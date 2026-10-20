@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { HttpError } from '../src/http/errors.js'
 import { buildAnonymousReportPayload } from '../src/modules/reports/anonymousReportPayload.js'
-import { normalizeRoundtableEmailCheck, normalizeRoundtableRegistration } from '../src/modules/roundtable/roundtableValidation.js'
+import { normalizeRoundtableEmailCheck, normalizeRoundtableEventUpdate, normalizeRoundtableRegistration } from '../src/modules/roundtable/roundtableValidation.js'
 import { normalizeWebinarEmailCheck, normalizeWebinarRegistration } from '../src/modules/webinar/webinarValidation.js'
 import { buildReportObjectPaths } from '../src/modules/reports/reportAssetStorage.js'
 import { buildReportJobRequest } from '../src/modules/reports/reportPayload.js'
@@ -28,6 +28,7 @@ function allAnswers() {
 }
 
 const participant = {
+  companyName: '  Công ty   CWI ',
   email: 'AN@Company.com',
   fullName: 'Nguyễn Văn An',
   phone: '090 123 4567',
@@ -67,8 +68,10 @@ describe('normalizeSurveySubmission', () => {
     expect(submission.participant.phone).toBe('+84901234567')
     expect(submission.statusNote).toContain('Phần 1')
     expect(submission.surveyVersion).toBe('2026Q4')
+    expect(submission.participant.companyName).toBe('Công ty CWI')
 
     const reportPayload = buildAnonymousReportPayload(submission)
+    // The report service contract has no company field; it stays in our database only.
     expect(reportPayload.participant).toEqual({ position: 'HRM' })
     expect(reportPayload).not.toHaveProperty('phone')
     expect(reportPayload.delivery_contact).toEqual({ email: 'an@company.com', full_name: 'Nguyễn Văn An' })
@@ -293,31 +296,83 @@ describe('normalizeSurveySubmission', () => {
       surveyVersion,
     }, null)).toThrow(HttpError)
   })
+
+  it('accepts a submission from a page opened before the company field existed', () => {
+    const { companyName: _omitted, ...withoutCompany } = participant
+    const submission = normalizeSurveySubmission({
+      answers: partOneAnswers(),
+      participant: withoutCompany,
+      privacyConsent: 'not_applicable',
+      submissionStatus: 'part1_only',
+      surveyVersion,
+    }, null)
+    expect(submission.participant.companyName).toBeNull()
+  })
+
+  it('rejects an empty company name', () => {
+    expectHttpErrorCode(() => normalizeSurveySubmission({
+      answers: partOneAnswers(),
+      participant: { ...participant, companyName: '   ' },
+      privacyConsent: 'not_applicable',
+      submissionStatus: 'part1_only',
+      surveyVersion,
+    }, null), 'invalid_payload')
+  })
 })
 
 describe('normalizeRoundtableRegistration', () => {
+  const roundtablePayload = {
+    clientMeta: { path: '/survey' },
+    companyName: '  Công ty   CWI ',
+    email: 'CEO@Company.com',
+    fullName: '  Nguyễn   Văn An  ',
+    phone: '090 123 4567',
+    position: ' CEO / Tổng Giám đốc ',
+    surveySubmissionIdempotencyKey: 'source4:survey-key-1',
+  }
+
   it('normalizes email-only status checks', () => {
     expect(normalizeRoundtableEmailCheck({ email: '  CEO@Company.com ' })).toEqual({ email: 'ceo@company.com' })
   })
 
-  it('normalizes standalone roundtable registration payloads', () => {
-    const registration = normalizeRoundtableRegistration(
-      {
-        clientMeta: { path: '/survey' },
-        email: 'CEO@Company.com',
-        fullName: '  Nguyễn   Văn An  ',
-        position: ' CEO / Tổng Giám đốc ',
-        surveySubmissionIdempotencyKey: 'source4:survey-key-1',
-      },
-      'roundtable-key-1',
-    )
+  it('normalizes registrations into the current quarter with contact details', () => {
+    const registration = normalizeRoundtableRegistration(roundtablePayload, 'roundtable-key-1')
 
     expect(registration.email).toBe('ceo@company.com')
     expect(registration.fullName).toBe('Nguyễn Văn An')
+    expect(registration.companyName).toBe('Công ty CWI')
+    expect(registration.phone).toBe('+84901234567')
+    expect(registration.quarter).toBe('2026Q4')
     expect(registration.idempotencyKey).toBe('roundtable-key-1')
     expect(registration.position).toBe('CEO / Tổng Giám đốc')
     expect(registration.surveySubmissionIdempotencyKey).toBe('source4:survey-key-1')
     expect(registration.payloadHash).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  it('requires phone and company name', () => {
+    const { phone: _phone, ...withoutPhone } = roundtablePayload
+    const { companyName: _company, ...withoutCompany } = roundtablePayload
+    expectHttpErrorCode(() => normalizeRoundtableRegistration(withoutPhone, null), 'invalid_roundtable_payload')
+    expectHttpErrorCode(() => normalizeRoundtableRegistration(withoutCompany, null), 'invalid_roundtable_payload')
+    expectHttpErrorCode(() => normalizeRoundtableRegistration({ ...roundtablePayload, phone: '12345678' }, null), 'invalid_roundtable_phone')
+  })
+
+  it('does not let the client choose the quarter', () => {
+    expectHttpErrorCode(() => normalizeRoundtableRegistration({ ...roundtablePayload, quarter: '2026Q3' }, null), 'invalid_roundtable_payload')
+  })
+})
+
+describe('normalizeRoundtableEventUpdate', () => {
+  it('trims the admin-entered time and location', () => {
+    expect(normalizeRoundtableEventUpdate({ eventLocation: ' Tòa nhà   VCCI ', eventTime: ' 8:00 – 10:00,  Thứ năm ' })).toEqual({
+      eventLocation: 'Tòa nhà VCCI',
+      eventTime: '8:00 – 10:00, Thứ năm',
+    })
+  })
+
+  it('rejects empty or oversized values', () => {
+    expectHttpErrorCode(() => normalizeRoundtableEventUpdate({ eventLocation: '', eventTime: '8:00' }), 'invalid_roundtable_event')
+    expectHttpErrorCode(() => normalizeRoundtableEventUpdate({ eventLocation: 'VCCI', eventTime: 'x'.repeat(301) }), 'invalid_roundtable_event')
   })
 })
 
