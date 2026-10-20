@@ -48,8 +48,11 @@ type RoundtableExportRow = {
   linked_submitted_at: Date | null
   linked_status_note: string | null
   linked_answers_count: number | null
+  company_name: string | null
+  phone: string | null
   position: string | null
   registered_at: Date
+  speaker_question: string | null
 }
 
 type EventRegistrationTable = 'cwi_roundtable_registrations' | 'cwi_webinar_registrations'
@@ -320,12 +323,16 @@ export class PgExportRepository {
     if (filters.linkStatus === 'standalone') where.push('r.submission_id IS NULL')
     if (filters.search) {
       params.push('%' + filters.search + '%')
-      where.push('(r.full_name ILIKE $' + params.length + ' OR r.email ILIKE $' + params.length + ' OR r.position ILIKE $' + params.length + ' OR s.full_name ILIKE $' + params.length + ' OR s.email ILIKE $' + params.length + ' OR s.position ILIKE $' + params.length + ')')
+      where.push('(r.full_name ILIKE $' + params.length + ' OR r.email ILIKE $' + params.length + ' OR r.position ILIKE $' + params.length + ' OR s.full_name ILIKE $' + params.length + ' OR s.email ILIKE $' + params.length + ' OR s.position ILIKE $' + params.length + ' OR s.phone ILIKE $' + params.length + ')')
     }
+    // Only Webinar registrations collect phone, company and a speaker question.
+    const contactColumns = table === 'cwi_webinar_registrations'
+      ? 'r.phone, r.company_name, r.speaker_question,'
+      : 'NULL::text AS phone, NULL::text AS company_name, NULL::text AS speaker_question,'
     params.push(batchSize + 1)
     const result = await this.pool.query<RoundtableExportRow>(
       [
-        'SELECT r.id, r.full_name, r.email, r.position, r.registered_at,',
+        'SELECT r.id, r.full_name, r.email, r.position, r.registered_at, ' + contactColumns,
         '       s.id AS linked_submission_id, s.full_name AS linked_full_name, s.email AS linked_email,',
         '       s.position AS linked_position, s.submission_status AS linked_submission_status,',
         '       s.status_note AS linked_status_note, s.privacy_consent AS linked_privacy_consent,',
