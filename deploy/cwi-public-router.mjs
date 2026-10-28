@@ -84,8 +84,11 @@ function parseByteRange(header, fileSize) {
   return { end: Math.min(end, fileSize - 1), start }
 }
 
-async function proxyApi(req, res) {
-  const target = new URL(req.url ?? '/', apiBaseUrl)
+async function proxyApi(req, res, url) {
+  // Only the path and query come from the client; scheme, host and port are fixed.
+  const target = new URL(apiBaseUrl)
+  target.pathname = url.pathname
+  target.search = url.search
   const headers = new Headers(req.headers)
   headers.set('host', target.host)
   headers.set('accept-encoding', 'identity')
@@ -169,8 +172,14 @@ async function serveApp(req, res, root, strippedPath) {
 createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? '/', 'http://localhost')
+    // Accept origin-form targets only. "//host/..." or "/\host/..." would otherwise
+    // parse as another host.
+    if (url.origin !== 'http://localhost' || !(req.url ?? '').startsWith('/')) {
+      sendError(res, 400, 'Bad Request')
+      return
+    }
     if (url.pathname.startsWith('/api/')) {
-      await proxyApi(req, res)
+      await proxyApi(req, res, url)
       return
     }
 
