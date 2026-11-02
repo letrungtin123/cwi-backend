@@ -66,14 +66,17 @@ describe("PgReportDeliveryRepository", () => {
         original_file_name: "Báo cáo khảo sát Q3 2026.pdf",
         report_job_id: "report-job-id",
         report_type: "anonymous",
+        language: "en",
       }],
     })
     const repository = new PgReportDeliveryRepository({ query } as unknown as pg.Pool)
 
     await expect(repository.claimJob("job-id", "worker-id", 60_000)).resolves.toMatchObject({
+      language: "en",
       originalFileName: "Báo cáo khảo sát Q3 2026.pdf",
       reportType: "anonymous",
     })
+    expect(String(query.mock.calls[0]?.[0])).toContain("submission.language")
     expect(String(query.mock.calls[0]?.[0])).toContain("original_file_name")
     expect(String(query.mock.calls[0]?.[0])).toContain("report_job_id")
     expect(String(query.mock.calls[0]?.[0])).not.toContain("published_at IS NOT NULL")

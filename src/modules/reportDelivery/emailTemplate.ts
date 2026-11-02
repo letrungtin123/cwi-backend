@@ -1,3 +1,4 @@
+import type { SurveyLanguage } from '../survey/surveyQuestions.js'
 import type { ReportEmailType } from './reportDeliveryTypes.js'
 
 type ReportEmailContent = {
@@ -65,6 +66,52 @@ const anonymousContent: ReportEmailContent = {
   signature: ['Trân trọng,', 'Phạm Thị Mỹ Lệ', 'T/M Ban Tổ chức', 'CEO WORKFORCE INDEX', 'Better workforce. Better business.'],
 }
 
+// English versions for surveys taken in English; they follow the Vietnamese text paragraph by paragraph.
+const personalizedContentEn: ReportEmailContent = {
+  subject: 'CEO Workforce Index Survey Results Report',
+  preview: 'Your CEO Workforce Index survey results report is ready.',
+  greeting: 'Dear Sir/Madam,',
+  paragraphs: [
+    'On behalf of the CEO Workforce Index (CWI) Organizing Committee, I would like to sincerely thank you for taking the time to complete the survey in the first season of the CEO Workforce Index.',
+    'Your participation not only provides practical, useful insights and specific action recommendations for your own company, but also makes a valuable contribution to the first benchmark dataset on "Workforce Plus" for the business community in Vietnam. These are the measures and actions to strengthen integrated execution capacity across people, AI, automation and the ecosystem, so that businesses in Vietnam can meet their growth expectations.',
+    'Based on the information you shared, CWI is pleased to send you a report dedicated to your business, to help you look deeper and take priority actions over the next 90 days on "Workforce Plus for Future Readiness" - one of the four main themes of "Workforce Plus".',
+  ],
+  listIntro: 'Please find the report attached to this email. Prepared with a strong commitment to independence and information security, we hope it will help you:',
+  listItems: [
+    'Benchmark against the market to see where your business stands.',
+    'Identify the gaps and risks that need attention.',
+    'Consider and choose suitable action recommendations for business growth.',
+  ],
+  textListPrefix: '- ',
+  contact: 'If you have any questions or need further clarification, please do not hesitate to contact us at contact@ceo-workforce-index.com',
+  feedback: 'CWI also values all your feedback and contributions, so that we can keep improving the survey experience, the report and the benchmark quality for the next season.',
+  closing: 'Once again, CWI sincerely thanks you for your trust and contribution in the first season of the project, helping build a valuable benchmark dataset for the community of business leaders in Vietnam.',
+  signature: ['Best regards,', 'Phạm Thị Mỹ Lệ', 'On behalf of the Organizing Committee', 'CEO WORKFORCE INDEX', 'Better workforce. Better business.'],
+}
+
+const anonymousContentEn: ReportEmailContent = {
+  subject: 'CEO Workforce Index Anonymous Survey Results Report',
+  preview: 'Your CEO Workforce Index anonymous survey results report is ready.',
+  greeting: 'Dear Sir/Madam,',
+  paragraphs: [
+    'On behalf of the CEO Workforce Index (CWI) Organizing Committee, I would like to sincerely thank you for taking the time to complete the survey in the first season of the CEO Workforce Index.',
+    'Your participation not only provides practical, useful insights and specific action recommendations for businesses, but also makes a valuable contribution to the first benchmark dataset on “Workforce Plus” for the business community in Vietnam. These are the measures and actions to strengthen integrated execution capacity across people, AI, automation and the ecosystem, helping businesses meet their growth expectations in a new context.',
+    'As you chose not to share your information when taking the survey, the Program only records and processes your survey data in anonymous mode. To receive the full report, please complete both parts of the survey and agree to let CEO Workforce Index process your personal information for the purposes of the Program.',
+    'Based on the information you shared, CWI is pleased to send you the anonymous survey results report, to give you more perspective on “Workforce Plus for Future Readiness” – one of the four main themes of “Workforce Plus”.',
+  ],
+  listIntro: 'Please find the report attached to this email. With a strong commitment to independence and information security, CWI hopes the report will help you:',
+  listItems: [
+    'Benchmark against the market to determine where your business stands.',
+    'Identify the gaps and risks that need attention.',
+    'Consider and choose suitable action recommendations for your business growth goals.',
+  ],
+  textListPrefix: '',
+  contact: 'If you have any questions or need further clarification about the report, please do not hesitate to contact us at contact@ceo-workforce-index.com.',
+  feedback: 'CWI also values all your feedback and contributions, so that we can keep improving the survey experience, the report and the quality of the benchmark data for the coming seasons.',
+  closing: 'Once again, CWI sincerely thanks you for your trust and contribution in the first season of the program, helping build a valuable benchmark dataset for the community of business leaders in Vietnam.',
+  signature: ['Best regards,', 'Phạm Thị Mỹ Lệ', 'On behalf of the Organizing Committee', 'CEO WORKFORCE INDEX', 'Better workforce. Better business.'],
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -93,7 +140,7 @@ function htmlParagraph(value: string, margin = '0 0 20px') {
   return `<p style="margin:${margin};">${escapeHtml(value)}</p>`
 }
 
-function htmlContent(content: ReportEmailContent) {
+function htmlContent(content: ReportEmailContent, language: SurveyLanguage) {
   const paragraphs = content.paragraphs.map((paragraph) => htmlParagraph(paragraph)).join('')
   const list = content.listItems
     .map((item, index) => `<li style="${index === content.listItems.length - 1 ? 'padding:0;' : 'padding:0 0 8px;'}">${escapeHtml(item)}</li>`)
@@ -105,7 +152,7 @@ function htmlContent(content: ReportEmailContent) {
   const signatureOpening = content.signature[0] ?? 'Trân trọng,'
 
   return `<!doctype html>
-<html lang="vi">
+<html lang="${language}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -159,7 +206,9 @@ function htmlContent(content: ReportEmailContent) {
 </html>`
 }
 
-export function buildReportEmail(reportType: ReportEmailType = 'personalized'): BuiltReportEmail {
-  const content = reportType === 'anonymous' ? anonymousContent : personalizedContent
-  return { html: htmlContent(content), subject: content.subject, text: textContent(content) }
+export function buildReportEmail(reportType: ReportEmailType = 'personalized', language: SurveyLanguage = 'vi'): BuiltReportEmail {
+  const content = language === 'en'
+    ? (reportType === 'anonymous' ? anonymousContentEn : personalizedContentEn)
+    : (reportType === 'anonymous' ? anonymousContent : personalizedContent)
+  return { html: htmlContent(content, language), subject: content.subject, text: textContent(content) }
 }

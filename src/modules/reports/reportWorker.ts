@@ -10,6 +10,7 @@ import { ReportServiceClient, ReportServiceError, type CompletedReport } from '.
 export type ReportWorkerConfig = {
   autoEmailEnabled: boolean
   generatedPdfFileName: string
+  generatedPdfFileNameEn: string
   generatedStorageBucket: string
   debugDumpHtml: boolean
   debugHtmlDir: string
@@ -72,6 +73,7 @@ function minimalReportForStorage(report: CompletedReport) {
     assets: report.assets ?? [],
     citations: report.citations ?? [],
     generated_at: report.generated_at,
+    language: report.language ?? 'vi',
     lifecycle: report.lifecycle ?? null,
     next_action: report.next_action ?? null,
     report_id: report.report_id,
@@ -195,11 +197,15 @@ export class ReportWorker {
     }
   }
 
+  // reportId is the Vietnamese report cwi-ai generated. A survey taken in English
+  // publishes its English translation instead; job.aiReportId keeps the Vietnamese id.
   private async generateAndUploadReportAssets(job: ClaimedReportJob, reportId: string) {
     let storedHtml: StoredHtml | null = null
 
     try {
-      const report = await this.dependencies.client.getReport(reportId)
+      const report = job.language === 'en'
+        ? await this.dependencies.client.createEnglishReport(reportId)
+        : await this.dependencies.client.getReport(reportId)
       if (this.dependencies.config.debugDumpHtml) {
         try {
           const debugPath = path.resolve(this.dependencies.config.debugHtmlDir, `${job.id}-${report.report_id}.html`)
@@ -227,7 +233,7 @@ export class ReportWorker {
         pdf.sha256,
         {
           enabled: this.dependencies.config.autoEmailEnabled,
-          fileName: this.dependencies.config.generatedPdfFileName,
+          fileName: job.language === 'en' ? this.dependencies.config.generatedPdfFileNameEn : this.dependencies.config.generatedPdfFileName,
           storageBucket: this.dependencies.config.generatedStorageBucket,
         },
       )

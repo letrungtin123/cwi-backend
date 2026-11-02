@@ -31,13 +31,14 @@ if (!env.reportServiceEnabled) {
   })
   const worker = new ReportWorker({
     assetStorage,
-    client: new ReportServiceClient({ baseUrl: env.reportServiceBaseUrl, timeoutMs: env.reportServiceTimeoutMs }),
+    client: new ReportServiceClient({ baseUrl: env.reportServiceBaseUrl, englishTimeoutMs: env.reportServiceEnglishTimeoutMs, timeoutMs: env.reportServiceTimeoutMs }),
     config: {
       autoEmailEnabled: env.reportAutoEmailEnabled,
       debugDumpHtml: env.reportDebugDumpHtml,
       debugHtmlDir: env.reportDebugHtmlDir,
       enabled: true,
       generatedPdfFileName: env.reportGeneratedPdfFileName,
+      generatedPdfFileNameEn: env.reportGeneratedPdfFileNameEn,
       generatedStorageBucket: env.reportStorageBucket,
       initialPollDelayMs: env.reportWorkerInitialPollDelayMs,
       lockMs: env.reportWorkerLockMs,
