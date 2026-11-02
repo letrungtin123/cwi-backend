@@ -402,20 +402,20 @@ export class PgReportDeliveryRepository {
 
   async claimJob(id: string, workerId: string, lockMs: number): Promise<ClaimedEmailJob | null> {
     const leaseToken = randomUUID()
-    const result = await this.pool.query<{ id: string; campaign_id: string | null; submission_id: string; recipient_email: string; recipient_name: string; storage_bucket: string; storage_path: string; file_sha256: string; attempt_count: number; original_file_name: string | null; report_job_id: string | null; report_type: string | null }>(
+    const result = await this.pool.query<{ id: string; campaign_id: string | null; submission_id: string; recipient_email: string; recipient_name: string; storage_bucket: string; storage_path: string; file_sha256: string; attempt_count: number; original_file_name: string | null; report_job_id: string | null; report_type: string | null; language: string | null }>(
       [
         `WITH candidate AS (SELECT j.id FROM public.cwi_report_email_jobs j WHERE j.id = $1 AND j.status = 'queued' AND j.next_attempt_at <= now() FOR UPDATE OF j),`,
         `updated AS (`,
         `  UPDATE public.cwi_report_email_jobs j SET status = 'sending', attempt_count = j.attempt_count + 1, locked_at = now(), locked_by = $2, lease_token = $4, lease_expires_at = now() + ($3::bigint * interval '1 millisecond'), attempt_started_at = now(), delivery_unknown_at = NULL, last_error_code = NULL, last_error_message = NULL FROM candidate WHERE j.id = candidate.id`,
         `  RETURNING j.id, j.campaign_id, j.submission_id, j.report_job_id, j.recipient_email, j.recipient_name, j.storage_bucket, j.storage_path, j.file_sha256, j.attempt_count, j.original_file_name`,
         `)`,
-        `SELECT updated.id, updated.campaign_id, updated.submission_id, updated.recipient_email, updated.recipient_name, updated.storage_bucket, updated.storage_path, updated.file_sha256, updated.attempt_count, COALESCE(updated.original_file_name, manual_file.original_file_name) AS original_file_name, COALESCE(report.report_type, 'personalized') AS report_type`,
-        `FROM updated LEFT JOIN public.cwi_submission_report_files manual_file ON manual_file.submission_id = updated.submission_id LEFT JOIN public.cwi_report_jobs report ON report.id = updated.report_job_id`,
+        `SELECT updated.id, updated.campaign_id, updated.submission_id, updated.recipient_email, updated.recipient_name, updated.storage_bucket, updated.storage_path, updated.file_sha256, updated.attempt_count, COALESCE(updated.original_file_name, manual_file.original_file_name) AS original_file_name, COALESCE(report.report_type, 'personalized') AS report_type, submission.language`,
+        `FROM updated LEFT JOIN public.cwi_submission_report_files manual_file ON manual_file.submission_id = updated.submission_id LEFT JOIN public.cwi_report_jobs report ON report.id = updated.report_job_id LEFT JOIN public.cwi_survey_submissions submission ON submission.id = updated.submission_id`,
       ].join('\n'),
       [id, workerId, lockMs, leaseToken],
     )
     const row = result.rows[0]
-    return row ? { attemptCount: Number(row.attempt_count), campaignId: row.campaign_id, fileSha256: row.file_sha256, id: row.id, leaseToken, originalFileName: row.original_file_name ?? 'Bao-cao-CEO-Workforce-Index.pdf', recipientEmail: row.recipient_email, recipientName: row.recipient_name, reportType: row.report_type === 'anonymous' ? 'anonymous' : 'personalized', storageBucket: row.storage_bucket, storagePath: row.storage_path, submissionId: row.submission_id } : null
+    return row ? { attemptCount: Number(row.attempt_count), campaignId: row.campaign_id, fileSha256: row.file_sha256, id: row.id, language: row.language === 'en' ? 'en' : 'vi', leaseToken, originalFileName: row.original_file_name ?? 'Bao-cao-CEO-Workforce-Index.pdf', recipientEmail: row.recipient_email, recipientName: row.recipient_name, reportType: row.report_type === 'anonymous' ? 'anonymous' : 'personalized', storageBucket: row.storage_bucket, storagePath: row.storage_path, submissionId: row.submission_id } : null
   }
 
   async markSent(jobId: string, leaseToken: string, providerMessageId: string) {

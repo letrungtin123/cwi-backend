@@ -1,3 +1,5 @@
+import type { SurveyLanguage } from '../survey/surveyQuestions.js'
+
 export type DeliveryEmailStatus = 'not_sent' | 'queued' | 'sending' | 'sent' | 'failed' | 'unknown'
 
 export type ReportEmailType = 'anonymous' | 'personalized'
@@ -43,6 +45,8 @@ export type ClaimedEmailJob = {
   campaignId: string | null
   fileSha256: string
   id: string
+  // Language the survey was taken in; it picks the email text.
+  language: SurveyLanguage
   leaseToken: string
   originalFileName: string
   reportType: ReportEmailType

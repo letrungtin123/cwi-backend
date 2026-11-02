@@ -1,6 +1,8 @@
 import type pg from 'pg'
 import { encodeCursor } from '../../http/cursor.js'
 import { HttpError } from '../../http/errors.js'
+import type { SurveyLanguage } from '../survey/surveyQuestions.js'
+import { surveyTextEn } from '../survey/surveyQuestionsEn.js'
 
 export type ReportSummary = {
   errorMessage: string | null
@@ -20,6 +22,8 @@ export type SubmissionListItem = {
   email: string
   fullName: string
   id: string
+  // Language the survey was taken in.
+  language: SurveyLanguage
   part1Completed: boolean
   part2Completed: boolean
   position: string
@@ -81,6 +85,7 @@ type SubmissionRow = {
   email: string
   full_name: string
   id: string
+  language: string
   part1_completed: boolean
   part2_completed: boolean
   phone: string | null
@@ -280,6 +285,7 @@ const submissionSelect = `
     s.roundtable_registered,
     s.submitted_at,
     s.survey_version,
+    s.language,
     EXISTS (
       SELECT 1
       FROM public.cwi_submission_report_files AS uploaded_report
@@ -417,6 +423,7 @@ function mapListItem(row: SubmissionRow): SubmissionListItem {
     email: row.email,
     fullName: row.full_name,
     id: row.id,
+    language: row.language === 'en' ? 'en' : 'vi',
     part1Completed: row.part1_completed,
     part2Completed: row.part2_completed,
     position: row.position,
@@ -1123,15 +1130,18 @@ export class PgAdminRepository {
       throw new HttpError(404, 'submission_not_found', 'Survey submission was not found.')
     }
 
+    // A survey taken in English is shown in English, as the respondent saw it. Answers are stored
+    // in Vietnamese, so question and option text is looked up; scores and free text stay as stored.
+    const english = row.language === 'en'
     return {
       ...mapListItem(row),
       answers: answersResult.rows.map((answer) => ({
-        answerText: answer.answer_text,
+        answerText: english && answer.question_type === 'mcq' ? surveyTextEn(answer.answer_text) : answer.answer_text,
         answerValue: answer.answer_value,
         idx: answer.question_idx,
         otherText: answer.other_text,
         part: answer.part,
-        questionText: answer.question_text,
+        questionText: english ? surveyTextEn(answer.question_text) : answer.question_text,
         questionType: answer.question_type,
       })),
       roundtableRegistration: roundtableResult.rows[0]

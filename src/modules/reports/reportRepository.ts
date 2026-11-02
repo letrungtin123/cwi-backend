@@ -1,4 +1,5 @@
 import type pg from 'pg'
+import type { SurveyLanguage } from '../survey/surveyQuestions.js'
 import type { ReportAccepted, ReportJobStatus } from './reportServiceClient.js'
 import { normalizeStoredReportPayload } from './reportPayload.js'
 
@@ -22,6 +23,8 @@ export type ClaimedReportJob = {
   createdAt: Date
   htmlStoragePath: string | null
   id: string
+  // Language the survey was taken in; an 'en' job publishes cwi-ai's English translation.
+  language: SurveyLanguage
   pollCount: number
   providerEndpoint: string
   reportType: string
@@ -70,6 +73,7 @@ type ClaimedReportJobRow = {
   created_at: Date
   html_storage_path: string | null
   id: string
+  language: string | null
   poll_count: number
   provider_endpoint: string
   report_type: string
@@ -103,6 +107,7 @@ function mapClaimedJob(row: ClaimedReportJobRow): ClaimedReportJob {
     createdAt: row.created_at,
     htmlStoragePath: row.html_storage_path,
     id: row.id,
+    language: row.language === 'en' ? 'en' : 'vi',
     pollCount: row.poll_count,
     providerEndpoint: row.provider_endpoint,
     reportType: row.report_type,
@@ -116,6 +121,7 @@ function minimalReportPayload(report: {
   assets?: unknown[]
   citations?: unknown[]
   generated_at: string
+  language?: string
   lifecycle?: unknown
   next_action?: unknown
   report_id: string
@@ -127,6 +133,7 @@ function minimalReportPayload(report: {
     assetCount: report.assets?.length ?? 0,
     citationCount: report.citations?.length ?? 0,
     generated_at: report.generated_at,
+    language: report.language ?? 'vi',
     lifecycle: report.lifecycle ?? null,
     next_action: report.next_action ?? null,
     report_id: report.report_id,
@@ -255,7 +262,8 @@ export class PgReportRepository {
         job.poll_count,
         job.ai_job_id,
         job.ai_report_id,
-        job.html_storage_path
+        job.html_storage_path,
+        (SELECT submission.language FROM public.cwi_survey_submissions AS submission WHERE submission.id = job.submission_id) AS language
       `,
       [readyStatuses, lockMs, workerId],
     )

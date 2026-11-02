@@ -84,6 +84,26 @@ describe('normalizeSurveySubmission', () => {
     })
   })
 
+  it('records the survey language, defaulting to Vietnamese, and keeps Vietnamese answers', () => {
+    const payload = {
+      answers: partOneAnswers(),
+      participant,
+      privacyConsent: 'not_applicable',
+      submissionStatus: 'part1_only',
+      surveyVersion,
+    }
+
+    expect(normalizeSurveySubmission(payload, null).language).toBe('vi')
+
+    const english = normalizeSurveySubmission({ ...payload, language: 'en' }, null)
+    expect(english.language).toBe('en')
+    expect(english.answers[0]?.questionText).toBe('Chúng tôi có đủ năng lực để thích ứng nhanh trước thay đổi của thị trường.')
+    // The report service contract is unchanged: the language is not sent there yet.
+    expect(buildAnonymousReportPayload(english)).not.toHaveProperty('language')
+
+    expectHttpErrorCode(() => normalizeSurveySubmission({ ...payload, language: 'fr' }, null), 'invalid_payload')
+  })
+
   it('rejects submissions without the current survey version', () => {
     const payload = {
       answers: partOneAnswers(),

@@ -8,6 +8,7 @@ const submissionRow = {
   email: 'user@example.com',
   full_name: 'Nguyễn Văn A',
   id: '2c78db0b-e97e-49ca-8a9a-2565077f0ffd',
+  language: 'en',
   part1_completed: true,
   part2_completed: false,
   phone: '+84901234567',
@@ -143,7 +144,9 @@ describe('submission survey version filter', () => {
     })
 
     expect(result.items[0]?.surveyVersion).toBe('2026Q3')
+    expect(result.items[0]?.language).toBe('en')
     const [pageQuery, pageParams] = query.mock.calls.find(([sql]) => sql.includes('ORDER BY s.submitted_at DESC, s.id DESC')) ?? []
+    expect(pageQuery).toContain('s.language')
     expect(pageQuery).toContain('s.survey_version = $1')
     expect(pageParams?.[0]).toBe('2026Q3')
   })
@@ -165,5 +168,40 @@ describe('submission survey version filter', () => {
     const versionQueries = query.mock.calls.filter(([sql]) => sql.includes('s.survey_version = $1'))
     expect(versionQueries).toHaveLength(2)
     expect(versionQueries.every(([, params]) => params?.[0] === '2026Q4')).toBe(true)
+  })
+})
+
+describe('submission detail language', () => {
+  const answerRows = [
+    { submission_id: submissionRow.id, question_idx: 1, part: 1, question_type: 'likert', question_text: 'Chúng tôi có đủ năng lực để thích ứng nhanh trước thay đổi của thị trường.', answer_value: 5, answer_text: '5', other_text: null },
+    { submission_id: submissionRow.id, question_idx: 17, part: 1, question_type: 'mcq', question_text: 'Trong 12 tháng tới, rủi ro lớn nhất cản trở doanh nghiệp của anh/chị trở nên sẵn sàng cho tương lai (Future-Ready) là gì?', answer_value: 'Khác.', answer_text: 'Khác.', other_text: 'Supply chain' },
+    { submission_id: submissionRow.id, question_idx: 24, part: 2, question_type: 'text', question_text: 'Website chính thức của công ty', answer_value: 'https://example.com', answer_text: 'https://example.com', other_text: null },
+  ]
+
+  function createDetailRepository(language: string) {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('cwi_survey_answers')) return { rows: answerRows }
+      if (sql.includes('cwi_roundtable_registrations')) return { rows: [] }
+      return { rows: [{ ...submissionRow, language }] }
+    })
+    return new PgAdminRepository({ query } as unknown as pg.Pool, 'test-secret')
+  }
+
+  it('shows a survey taken in English in English, keeping scores and free text as stored', async () => {
+    const detail = await createDetailRepository('en').getSubmission(submissionRow.id)
+
+    expect(detail.language).toBe('en')
+    expect(detail.answers.map((answer) => [answer.questionText, answer.answerText, answer.otherText])).toEqual([
+      ['We have the capability to adapt quickly to market changes.', '5', null],
+      ['In the next 12 months, what is the biggest risk preventing your company from becoming Future-Ready?', 'Other.', 'Supply chain'],
+      ["Your company's official website", 'https://example.com', null],
+    ])
+    expect(detail.answers[1]?.answerValue).toBe('Khác.')
+  })
+
+  it('shows a survey taken in Vietnamese exactly as stored', async () => {
+    const detail = await createDetailRepository('vi').getSubmission(submissionRow.id)
+
+    expect(detail.answers.map((answer) => [answer.questionText, answer.answerText])).toEqual(answerRows.map((answer) => [answer.question_text, answer.answer_text]))
   })
 })

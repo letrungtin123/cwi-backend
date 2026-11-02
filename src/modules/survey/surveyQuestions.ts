@@ -4,6 +4,11 @@
 // character because the report service validates the transport payload.
 export const SURVEY_VERSION = '2026Q4'
 
+// Language the respondent saw the survey in. Answers are always stored in the
+// Vietnamese text below, whichever language was shown.
+export const SURVEY_LANGUAGES = ['vi', 'en'] as const
+export type SurveyLanguage = (typeof SURVEY_LANGUAGES)[number]
+
 export const OTHER_OPTION = 'Khác.'
 
 export type SurveyQuestionType = 'likert' | 'mcq' | 'text'

@@ -23,6 +23,7 @@ const completedReportSchema = z.object({
   assets: z.array(z.unknown()).optional(),
   citations: z.array(z.unknown()).optional(),
   generated_at: z.string(),
+  language: z.enum(['vi', 'en']).optional(),
   lifecycle: z.unknown().optional(),
   next_action: z.unknown().nullable().optional(),
   report: z.object({
@@ -56,6 +57,7 @@ export class ReportServiceError extends Error {
 
 export type ReportServiceClientConfig = {
   baseUrl: string
+  englishTimeoutMs: number
   timeoutMs: number
 }
 
@@ -127,9 +129,27 @@ export class ReportServiceClient {
     return parseContract(completedReportSchema, data)
   }
 
-  private async request(path: string, init: RequestInit = {}) {
+  // Translates a stored Vietnamese report. cwi-ai translates it once; later calls with
+  // the same id return that same English report, so retrying is safe.
+  async createEnglishReport(viReportId: string): Promise<CompletedReport> {
+    const data = await this.request(
+      `/v3/reports/${encodeURIComponent(viReportId)}/english`,
+      { method: 'POST' },
+      this.config.englishTimeoutMs,
+    )
+    const report = parseContract(completedReportSchema, data)
+    if (report.language !== 'en') {
+      throw new ReportServiceError('Report service did not return an English report.', {
+        code: 'invalid_report_service_response',
+        retryable: false,
+      })
+    }
+    return report
+  }
+
+  private async request(path: string, init: RequestInit = {}, timeoutMs = this.config.timeoutMs) {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs)
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
     try {
       const response = await fetch(joinUrl(this.config.baseUrl, path), {

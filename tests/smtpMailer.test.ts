@@ -96,4 +96,21 @@ describe('report email template', () => {
     expect(html).toContain('Workforce Plus')
     expect(html).not.toContain('<img')
   })
+
+  it('uses the English templates for surveys taken in English', () => {
+    const personalized = buildReportEmail('personalized', 'en')
+    const anonymous = buildReportEmail('anonymous', 'en')
+
+    expect(personalized.subject).toBe('CEO Workforce Index Survey Results Report')
+    expect(personalized.html).toContain('<html lang="en">')
+    expect(personalized.text).toContain('"Workforce Plus for Future Readiness"')
+    expect(personalized.text).toContain('Best regards,\nPhạm Thị Mỹ Lệ\nOn behalf of the Organizing Committee\nCEO WORKFORCE INDEX')
+    expect(anonymous.subject).toBe('CEO Workforce Index Anonymous Survey Results Report')
+    expect(anonymous.text).toContain('As you chose not to share your information when taking the survey')
+    for (const email of [personalized, anonymous]) {
+      expect(email.text).not.toMatch(/Kính gửi|Trân trọng|Hệ cộng lực/)
+      expect(email.html).not.toContain('<img')
+    }
+    expect(buildReportEmail('anonymous', 'vi').html).toContain('<html lang="vi">')
+  })
 })

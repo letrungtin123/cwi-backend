@@ -5,8 +5,10 @@ import {
   ALL_QUESTION_IDXS,
   OTHER_OPTION,
   PART_ONE_QUESTION_IDXS,
+  SURVEY_LANGUAGES,
   SURVEY_QUESTION_BY_IDX,
   SURVEY_VERSION,
+  type SurveyLanguage,
   type SurveyQuestion,
   type SurveyQuestionType,
 } from './surveyQuestions.js'
@@ -50,6 +52,7 @@ export type NormalizedSurveySubmission = {
   answers: NormalizedAnswer[]
   clientMeta: Record<string, unknown>
   idempotencyKey: string | null
+  language: SurveyLanguage
   part1Completed: boolean
   part2Completed: boolean
   participant: Participant
@@ -85,6 +88,8 @@ const rawSubmissionSchema = z
     answers: z.array(rawAnswerSchema).min(18).max(24),
     clientMeta: z.record(z.string(), z.unknown()).optional(),
     idempotencyKey: idempotencyKeySchema.optional(),
+    // Optional so a page opened before the language switch existed can still submit.
+    language: z.enum(SURVEY_LANGUAGES).optional(),
     participant: z
       .object({
         // Required by the landing form; optional here so a page opened before
@@ -374,6 +379,7 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
     answers: orderedAnswers,
     clientMeta: raw.clientMeta ?? {},
     idempotencyKey: idempotencyKey ?? null,
+    language: raw.language ?? 'vi',
     part1Completed: true,
     part2Completed: rule.requiredPart === 'all',
     participant: {

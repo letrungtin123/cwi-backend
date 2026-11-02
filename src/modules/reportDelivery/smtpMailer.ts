@@ -1,4 +1,5 @@
 import nodemailer, { type Transporter } from 'nodemailer'
+import type { SurveyLanguage } from '../survey/surveyQuestions.js'
 import { buildReportEmail } from './emailTemplate.js'
 import { normalizeReportFileName } from './reportDeliveryFilename.js'
 import type { ReportEmailType } from './reportDeliveryTypes.js'
@@ -185,10 +186,10 @@ export class SmtpReportMailer {
     await (await this.getTransport()).verify()
   }
 
-  async send(input: { messageId: string; originalFileName: string; pdfPath: string; recipientEmail: string; recipientName: string; reportType: ReportEmailType }) {
+  async send(input: { language: SurveyLanguage; messageId: string; originalFileName: string; pdfPath: string; recipientEmail: string; recipientName: string; reportType: ReportEmailType }) {
     const transporter = await this.getTransport()
     try {
-      const { html, subject, text } = buildReportEmail(input.reportType)
+      const { html, subject, text } = buildReportEmail(input.reportType, input.language)
       const info = await transporter.sendMail({
         attachments: [buildReportPdfAttachment({ originalFileName: input.originalFileName, pdfPath: input.pdfPath })],
         from: { address: this.config.fromAddress, name: this.config.fromName },

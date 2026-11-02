@@ -143,7 +143,7 @@ async function consumeSend(repository: PgReportDeliveryRepository, manualStorage
     await downloadPdf(storage, job.storagePath, job.fileSha256, pdfPath)
     const fromDomain = env.mailFromAddress.split('@')[1] ?? 'ceo-workforce-index.com'
     const messageId = '<cwi-report-' + job.submissionId + '@' + fromDomain + '>'
-    const providerMessageId = await mailer.send({ messageId, originalFileName: job.originalFileName, pdfPath, recipientEmail: job.recipientEmail, recipientName: job.recipientName, reportType: job.reportType })
+    const providerMessageId = await mailer.send({ language: job.language, messageId, originalFileName: job.originalFileName, pdfPath, recipientEmail: job.recipientEmail, recipientName: job.recipientName, reportType: job.reportType })
     smtpAccepted = true
     const markedSent = await repository.markSent(job.id, job.leaseToken, providerMessageId)
     if (!markedSent) {
