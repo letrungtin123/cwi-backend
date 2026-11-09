@@ -3,6 +3,7 @@ import { encodeCursor } from '../../http/cursor.js'
 import { HttpError } from '../../http/errors.js'
 import type { SurveyLanguage } from '../survey/surveyQuestions.js'
 import { surveyTextEn } from '../survey/surveyQuestionsEn.js'
+import { submissionDeletableSql } from '../submissionDeletion/submissionDeletionRepository.js'
 
 export type ReportSummary = {
   errorMessage: string | null
@@ -32,6 +33,8 @@ export type SubmissionSourceFilter = string | 'none'
 export type SubmissionListItem = {
   answersCount: number
   companyName: string | null
+  // A super admin may delete it: its report is still "Chờ tạo báo cáo" (no PDF).
+  deletable: boolean
   email: string
   fullName: string
   id: string
@@ -97,6 +100,7 @@ export type SubmissionDetailListResult = {
 type SubmissionRow = {
   answers_count: number
   company_name: string | null
+  deletable: boolean
   email: string
   full_name: string
   id: string
@@ -322,7 +326,8 @@ const submissionSelect = `
     report.updated_at AS report_updated_at,
     report.pdf_storage_path AS report_pdf_storage_path,
     COALESCE(report.last_error_message, report.error_message) AS report_last_error_message,
-    COALESCE((SELECT NOT settings.ai_calls_enabled FROM public.cwi_report_generation_settings AS settings WHERE settings.id), false) AS report_generation_paused
+    COALESCE((SELECT NOT settings.ai_calls_enabled FROM public.cwi_report_generation_settings AS settings WHERE settings.id), false) AS report_generation_paused,
+    ${submissionDeletableSql('s')} AS deletable
   FROM public.cwi_survey_submissions AS s
   LEFT JOIN public.cwi_survey_sources AS survey_source ON survey_source.id = s.survey_source_id
   LEFT JOIN LATERAL (
@@ -467,6 +472,7 @@ function mapListItem(row: SubmissionRow): SubmissionListItem {
   return {
     answersCount: row.answers_count,
     companyName: row.company_name,
+    deletable: row.deletable === true,
     email: row.email,
     fullName: row.full_name,
     id: row.id,

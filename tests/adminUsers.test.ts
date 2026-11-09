@@ -95,3 +95,26 @@ describe('survey source history', () => {
     })
   })
 })
+
+describe('deleting waiting submissions', () => {
+  const id = '6f1e970a-8924-4870-9ab1-05804a0160fb'
+
+  it('accepts 1 to 200 ids and removes duplicates', async () => {
+    const { parseSubmissionIds, MAX_SUBMISSIONS_PER_DELETION } = await import('../src/modules/submissionDeletion/submissionDeletionRoutes.js')
+    expect(parseSubmissionIds({ ids: [id, id.toUpperCase()] })).toEqual([id])
+    expect(httpCode(() => parseSubmissionIds({ ids: [] }))).toBe('422 invalid_submission_ids')
+    expect(httpCode(() => parseSubmissionIds({ ids: ['abc'] }))).toBe('422 invalid_submission_ids')
+    expect(httpCode(() => parseSubmissionIds({ ids: Array.from({ length: MAX_SUBMISSIONS_PER_DELETION + 1 }, () => id) }))).toBe('422 invalid_submission_ids')
+    expect(httpCode(() => parseSubmissionIds({ ids: [id], force: true }))).toBe('422 invalid_submission_ids')
+  })
+
+  it('only allows rows whose report never started and has no PDF, file or email', async () => {
+    const { submissionDeletableSql } = await import('../src/modules/submissionDeletion/submissionDeletionRepository.js')
+    const sql = submissionDeletableSql('s')
+    expect(sql).toContain('NOT settings.ai_calls_enabled')
+    expect(sql).toContain("status NOT IN ('pending', 'queued')")
+    expect(sql).toContain('pdf_storage_path IS NOT NULL')
+    expect(sql).toContain('cwi_submission_report_files')
+    expect(sql).toContain('cwi_report_email_jobs')
+  })
+})
