@@ -17,6 +17,7 @@ type SubmissionExportRow = {
   status_note: string
   submission_status: string
   submitted_at: Date
+  survey_source_name: string | null
   survey_version: string
   id: string
 }
@@ -242,6 +243,12 @@ export class PgExportRepository {
       params.push(filters.roundtableRegistered)
       where.push('s.roundtable_registered = $' + params.length)
     }
+    if (filters.sourceId === 'none') {
+      where.push('s.survey_source_id IS NULL')
+    } else if (filters.sourceId) {
+      params.push(filters.sourceId)
+      where.push('s.survey_source_id = $' + params.length + '::uuid')
+    }
     if (filters.search) {
       params.push('%' + filters.search + '%')
       where.push('(s.full_name ILIKE $' + params.length + ' OR s.email ILIKE $' + params.length + ' OR s.phone ILIKE $' + params.length + ' OR s.position ILIKE $' + params.length + ')')
@@ -251,8 +258,9 @@ export class PgExportRepository {
       [
         'SELECT s.id, s.full_name, s.email, s.phone, s.company_name, s.position, s.submission_status, s.status_note, s.privacy_consent,',
         '       s.part1_completed, s.part2_completed, s.answers_count, s.roundtable_registered, s.submitted_at,',
-        '       s.survey_version, report.status AS report_status',
+        '       s.survey_version, survey_source.name AS survey_source_name, report.status AS report_status',
         'FROM public.cwi_survey_submissions AS s',
+        'LEFT JOIN public.cwi_survey_sources AS survey_source ON survey_source.id = s.survey_source_id',
         'LEFT JOIN LATERAL (',
         '  SELECT status FROM public.cwi_report_jobs',
         '  WHERE submission_id = s.id',
@@ -272,6 +280,11 @@ export class PgExportRepository {
       nextCursor: last ? { id: last.id, timestamp: last.submitted_at } : null,
       rows,
     }
+  }
+
+  async getSurveySourceName(id: string): Promise<string | null> {
+    const result = await this.pool.query<{ name: string }>('SELECT name FROM public.cwi_survey_sources WHERE id = $1', [id])
+    return result.rows[0]?.name ?? null
   }
 
   async listAnswerBatch(submissionIds: string[]): Promise<AnswerExportRow[]> {

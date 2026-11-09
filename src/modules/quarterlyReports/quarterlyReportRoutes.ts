@@ -14,6 +14,7 @@ import { ReportAssetStorageError, type ReportAssetStorage } from '../reports/rep
 import { QuarterlyReportDownloadTokenService } from './quarterlyReportDownloadToken.js'
 import { PgQuarterlyReportRepository } from './quarterlyReportRepository.js'
 import { normalizeQuarterlyReportDownload, normalizeQuarterlyReportUpload } from './quarterlyReportValidation.js'
+import { canManageContent } from '../auth/adminRoles.js'
 
 const slugPattern = /^q[1-4]-\d{4}$/
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -27,7 +28,7 @@ function assertEnabled(config: RuntimeConfig) {
 
 function assertAdmin(req: Request) {
   const session = getRequiredAdminSession(req)
-  if (session.user.role !== 'admin') throw new HttpError(403, 'admin_required', 'Bạn không có quyền thực hiện thao tác này.')
+  if (!canManageContent(session.user.role)) throw new HttpError(403, 'admin_required', 'Bạn không có quyền thực hiện thao tác này.')
   return session
 }
 

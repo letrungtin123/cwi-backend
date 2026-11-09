@@ -11,6 +11,8 @@ export type AuthConfig = {
   sessionTtlSeconds: number
   supabaseAnonKey: string
   supabaseAuthUrl: string
+  // Needed to add admin accounts and set passwords (Supabase Auth admin API).
+  supabaseServiceRoleKey: string
 }
 
 export type RuntimeConfig = {

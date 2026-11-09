@@ -18,6 +18,17 @@ export type ReportSummary = {
 
 export type ReportStatusFilter = 'not_started' | 'generating' | 'completed' | 'failed' | 'skipped'
 
+// Invitation source whose survey link the respondent used; null when they came without one.
+export type SubmissionSource = {
+  code: string
+  id: string
+  isActive: boolean
+  name: string
+}
+
+// A source id, or 'none' for submissions that came without a source link.
+export type SubmissionSourceFilter = string | 'none'
+
 export type SubmissionListItem = {
   answersCount: number
   companyName: string | null
@@ -33,6 +44,7 @@ export type SubmissionListItem = {
   report: ReportSummary
   roundtableRegistered: boolean
   phone: string | null
+  source: SubmissionSource | null
   statusNote: string
   submittedAt: string
   submissionStatus: string
@@ -72,6 +84,7 @@ export type SubmissionDetailListFilters = {
   reportPdfUploaded: boolean | null
   roundtableRegistered: boolean | null
   search: string | null
+  sourceId?: SubmissionSourceFilter | null
   status: string | null
   surveyVersion?: string | null
 }
@@ -104,6 +117,10 @@ type SubmissionRow = {
   status_note: string
   submitted_at: Date
   submission_status: string
+  survey_source_code: string | null
+  survey_source_id: string | null
+  survey_source_is_active: boolean | null
+  survey_source_name: string | null
   survey_version: string
 }
 
@@ -136,6 +153,7 @@ export type SubmissionListFilters = {
   reportPdfUploaded: boolean | null
   roundtableRegistered: boolean | null
   search: string | null
+  sourceId?: SubmissionSourceFilter | null
   status: string | null
   surveyVersion?: string | null
 }
@@ -290,6 +308,10 @@ const submissionSelect = `
     s.submitted_at,
     s.survey_version,
     s.language,
+    s.survey_source_id,
+    survey_source.code AS survey_source_code,
+    survey_source.name AS survey_source_name,
+    survey_source.is_active AS survey_source_is_active,
     EXISTS (
       SELECT 1
       FROM public.cwi_submission_report_files AS uploaded_report
@@ -302,6 +324,7 @@ const submissionSelect = `
     COALESCE(report.last_error_message, report.error_message) AS report_last_error_message,
     COALESCE((SELECT NOT settings.ai_calls_enabled FROM public.cwi_report_generation_settings AS settings WHERE settings.id), false) AS report_generation_paused
   FROM public.cwi_survey_submissions AS s
+  LEFT JOIN public.cwi_survey_sources AS survey_source ON survey_source.id = s.survey_source_id
   LEFT JOIN LATERAL (
     SELECT id, status, updated_at, pdf_storage_path, last_error_message, error_message
     FROM public.cwi_report_jobs
@@ -430,6 +453,16 @@ function mapReportSummary(row: SubmissionRow): ReportSummary {
   return unfinishedReportSummary(row)
 }
 
+function mapSubmissionSource(row: SubmissionRow): SubmissionSource | null {
+  if (!row.survey_source_id || !row.survey_source_code || !row.survey_source_name) return null
+  return {
+    code: row.survey_source_code,
+    id: row.survey_source_id,
+    isActive: row.survey_source_is_active === true,
+    name: row.survey_source_name,
+  }
+}
+
 function mapListItem(row: SubmissionRow): SubmissionListItem {
   return {
     answersCount: row.answers_count,
@@ -445,6 +478,7 @@ function mapListItem(row: SubmissionRow): SubmissionListItem {
     report: mapReportSummary(row),
     roundtableRegistered: row.roundtable_registered,
     phone: row.phone,
+    source: mapSubmissionSource(row),
     statusNote: row.status_note,
     submittedAt: toIso(row.submitted_at),
     submissionStatus: row.submission_status,
@@ -570,12 +604,23 @@ function appendLatestReportStatusFilter(where: string[], params: unknown[], repo
   ), 'not_started') = $${params.length}`)
 }
 
+function appendSourceFilter(where: string[], params: unknown[], sourceId: SubmissionSourceFilter | null | undefined) {
+  if (!sourceId) return
+  if (sourceId === 'none') {
+    where.push('s.survey_source_id IS NULL')
+    return
+  }
+  params.push(sourceId)
+  where.push('s.survey_source_id = $' + params.length + '::uuid')
+}
+
 function appendSubmissionDetailFilters(
   where: string[],
   params: unknown[],
   filters: SubmissionDetailListFilters,
 ) {
   appendLatestReportStatusFilter(where, params, filters.reportStatus)
+  appendSourceFilter(where, params, filters.sourceId)
 
   if (filters.status) {
     params.push(filters.status)
@@ -898,6 +943,7 @@ export class PgAdminRepository {
     }
 
     appendLatestReportStatusFilter(where, params, filters.reportStatus)
+    appendSourceFilter(where, params, filters.sourceId)
 
     if (filters.roundtableRegistered !== null) {
       params.push(filters.roundtableRegistered)

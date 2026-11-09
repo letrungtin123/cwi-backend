@@ -5,6 +5,7 @@ import { createAdminRequestRateLimit, getRequiredAdminSession, requireAdminSessi
 import { HttpError } from '../../http/errors.js'
 import type { AuthService } from '../auth/authService.js'
 import type { PgReportRepository, ReportGenerationSettingsUpdate } from './reportRepository.js'
+import { canManageContent } from '../auth/adminRoles.js'
 
 const settingsUpdateSchema = z
   .object({
@@ -45,7 +46,7 @@ export function createReportGenerationSettingsAdminRouter(repository: PgReportRe
   router.put('/', async (req, res, next) => {
     try {
       const session = getRequiredAdminSession(req)
-      if (session.user.role !== 'admin') throw new HttpError(403, 'admin_required', 'Bạn không có quyền đổi cài đặt tạo báo cáo.')
+      if (!canManageContent(session.user.role)) throw new HttpError(403, 'admin_required', 'Bạn không có quyền đổi cài đặt tạo báo cáo.')
       await repository.saveGenerationSettings(normalizeReportGenerationSettingsUpdate(req.body), session.user.email)
       res.json({ data: await currentState() })
     } catch (error) {

@@ -6,6 +6,7 @@ import { HttpError } from '../../http/errors.js'
 import { getRequestMeta } from '../../http/requestMeta.js'
 import type { AuthService } from '../auth/authService.js'
 import type { RoundtableService } from './roundtableService.js'
+import { canManageContent } from '../auth/adminRoles.js'
 
 export function createRoundtableRouter(service: RoundtableService, config: RuntimeConfig) {
   const router = Router()
@@ -79,7 +80,7 @@ export function createRoundtableEventAdminRouter(service: RoundtableService, aut
   router.put('/', async (req, res, next) => {
     try {
       const session = getRequiredAdminSession(req)
-      if (session.user.role !== 'admin') throw new HttpError(403, 'admin_required', 'Bạn không có quyền sửa thông tin CEO Roundtable.')
+      if (!canManageContent(session.user.role)) throw new HttpError(403, 'admin_required', 'Bạn không có quyền sửa thông tin CEO Roundtable.')
       res.json({ data: await service.saveCurrentEvent(req.body, session.user.email) })
     } catch (error) {
       next(error)

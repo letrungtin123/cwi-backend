@@ -4,6 +4,7 @@ import type { RequestMeta } from '../../http/requestMeta.js'
 import { constantTimeEqual, createOpaqueToken, sha256Hex } from './authCrypto.js'
 import type { PgAuthRepository } from './authRepository.js'
 import type { AdminSession, AdminUser } from './authTypes.js'
+import { setSupabaseAuthPassword } from './supabaseAdminClient.js'
 import { signInWithSupabasePassword } from './supabaseAuthClient.js'
 
 export type LoginResult = {
@@ -77,6 +78,42 @@ export class AuthService {
     if (!constantTimeEqual(sha256Hex(csrfToken), session.csrfTokenHash)) {
       throw new HttpError(403, 'csrf_token_invalid', 'CSRF token is invalid.')
     }
+  }
+
+  // "Đổi mật khẩu của tôi": checks the current password with Supabase Auth, sets
+  // the new one, and signs out the account's other sessions (this one stays).
+  async changePassword(
+    session: AdminSession,
+    input: { currentPassword: string; newPassword: string },
+    meta: RequestMeta,
+  ): Promise<void> {
+    if (input.currentPassword === input.newPassword) {
+      throw new HttpError(422, 'password_unchanged', 'Mật khẩu mới phải khác mật khẩu hiện tại.')
+    }
+    let supabaseUserId: string
+    try {
+      supabaseUserId = (await signInWithSupabasePassword(this.config, session.user.email, input.currentPassword)).id
+    } catch (error) {
+      // Not 401: the dashboard treats 401 as "signed out".
+      if (error instanceof HttpError && error.statusCode === 401) {
+        throw new HttpError(422, 'current_password_incorrect', 'Mật khẩu hiện tại không đúng.')
+      }
+      throw error
+    }
+    const authUserId = await this.repository.getAuthUserId(session.user.id)
+    if (!authUserId || authUserId !== supabaseUserId) {
+      throw new HttpError(403, 'admin_user_not_allowed', 'This account is not allowed to access the dashboard.')
+    }
+    await setSupabaseAuthPassword(this.config, authUserId, input.newPassword)
+    await this.repository.revokeOtherSessions(session.user.id, session.id)
+    await this.repository.writeAuditLog({
+      action: 'admin.password_change',
+      adminUserId: session.user.id,
+      clientIpHash: meta.clientIpHash,
+      targetId: session.user.id,
+      targetType: 'admin_user',
+      userAgent: meta.userAgent,
+    })
   }
 
   async logout(session: AdminSession, meta: RequestMeta): Promise<void> {

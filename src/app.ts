@@ -14,6 +14,9 @@ import { createAdminRouter } from './modules/admin/adminRoutes.js'
 import type { PgAdminRepository } from './modules/admin/adminRepository.js'
 import type { PgExportRepository } from './modules/exports/exportRepository.js'
 import { createAuthRouter } from './modules/auth/authRoutes.js'
+import { createAdminUserRouter } from './modules/adminUsers/adminUserRoutes.js'
+import { PgAdminUserRepository } from './modules/adminUsers/adminUserRepository.js'
+import { AdminUserService } from './modules/adminUsers/adminUserService.js'
 import type { AuthService } from './modules/auth/authService.js'
 import type { ReportAssetStorage } from './modules/reports/reportAssetStorage.js'
 import type { ReportAccessTokenService } from './modules/reports/reportAccessToken.js'
@@ -26,6 +29,8 @@ import { createReportGenerationSettingsAdminRouter } from './modules/reports/rep
 import { createRoundtableEventAdminRouter, createRoundtableRouter } from './modules/roundtable/roundtableRoutes.js'
 import type { RoundtableService } from './modules/roundtable/roundtableService.js'
 import { createSurveyRouter } from './modules/survey/surveyRoutes.js'
+import { createSurveySourceAdminRouter } from './modules/surveySources/surveySourceRoutes.js'
+import { PgSurveySourceRepository } from './modules/surveySources/surveySourceRepository.js'
 import type { SurveyService } from './modules/survey/surveyService.js'
 import { createWebinarRouter } from './modules/webinar/webinarRoutes.js'
 import type { WebinarService } from './modules/webinar/webinarService.js'
@@ -172,6 +177,8 @@ export function createApp(dependencies: AppDependencies) {
   app.use('/api/v1/admin/quarterly-reports', createQuarterlyReportAdminRouter(quarterlyReportRepository, quarterlyReportStorage, authService, config))
   app.use('/api/v1/admin/roundtable-event', createRoundtableEventAdminRouter(roundtableService, authService, config))
   app.use('/api/v1/admin/report-generation-settings', createReportGenerationSettingsAdminRouter(reportRepository, authService, config))
+  app.use('/api/v1/admin/admin-users', createAdminUserRouter(new AdminUserService(new PgAdminUserRepository(pool), config.auth), authService, config))
+  app.use('/api/v1/admin/survey-sources', createSurveySourceAdminRouter(new PgSurveySourceRepository(pool), authService, config))
   app.use(handleNotFound)
   app.use(handleError(logger))
   return app

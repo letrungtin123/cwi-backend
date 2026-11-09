@@ -10,6 +10,7 @@ import { MultipartUploadError, parsePdfUpload, removeParsedPdfUpload } from './r
 import { PgReportDeliveryRepository, ReportDeliveryRepositoryError } from './reportDeliveryRepository.js'
 import type { SmtpReportMailer } from './smtpMailer.js'
 import { contentDispositionAttachment } from './reportDeliveryFilename.js'
+import { canManageContent } from '../auth/adminRoles.js'
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -24,7 +25,7 @@ function enabled(config: RuntimeConfig) {
 
 function assertAdmin(req: Request) {
   const session = getRequiredAdminSession(req)
-  if (session.user.role !== 'admin') throw new HttpError(403, 'admin_required', 'Bạn không có quyền thực hiện thao tác này.')
+  if (!canManageContent(session.user.role)) throw new HttpError(403, 'admin_required', 'Bạn không có quyền thực hiện thao tác này.')
   return session
 }
 

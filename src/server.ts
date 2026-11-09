@@ -58,6 +58,7 @@ const config: RuntimeConfig = {
     sessionTtlSeconds: env.authSessionTtlSeconds,
     supabaseAnonKey: env.supabaseAnonKey,
     supabaseAuthUrl: env.supabaseAuthUrl,
+    supabaseServiceRoleKey: env.supabaseServiceRoleKey,
   },
   corsAllowedOrigins: env.corsAllowedOrigins,
   ipHashSecret: env.ipHashSecret,
