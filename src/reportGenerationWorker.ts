@@ -43,6 +43,7 @@ if (!env.reportServiceEnabled) {
       initialPollDelayMs: env.reportWorkerInitialPollDelayMs,
       lockMs: env.reportWorkerLockMs,
       loopIntervalMs: env.reportWorkerLoopIntervalMs,
+      maxAiInFlight: env.reportWorkerMaxAiInFlight,
       maxAttempts: env.reportWorkerMaxAttempts,
       maxPollDelayMs: env.reportWorkerMaxPollDelayMs,
     },

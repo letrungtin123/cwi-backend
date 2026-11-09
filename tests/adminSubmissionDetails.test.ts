@@ -205,3 +205,29 @@ describe('submission detail language', () => {
     expect(detail.answers.map((answer) => [answer.questionText, answer.answerText])).toEqual(answerRows.map((answer) => [answer.question_text, answer.answer_text]))
   })
 })
+
+describe('report summary while report creation is paused', () => {
+  async function listWithReport(reportGenerationPaused: boolean | null) {
+    const row = { ...submissionRow, report_generation_paused: reportGenerationPaused, report_job_id: 'b5f0c1de-0000-4000-8000-000000000001', report_status: 'pending' }
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('count(*)::text AS total_items')) return { rows: [{ total_items: '1' }] }
+      return { rows: [row] }
+    })
+    const repository = new PgAdminRepository({ query } as unknown as pg.Pool, 'test-secret')
+    const result = await repository.listSubmissionDetails({ limit: 10, page: 1, reportPdfUploaded: null, reportStatus: null, roundtableRegistered: null, search: null, status: null })
+    return { report: result.items[0]?.report, sql: String(query.mock.calls[0]?.[0]) }
+  }
+
+  it('labels an unfinished report as waiting while paused', async () => {
+    const { report, sql } = await listWithReport(true)
+
+    expect(report).toMatchObject({ generationPaused: true, label: 'Chờ tạo báo cáo', status: 'generating' })
+    expect(sql).toContain('cwi_report_generation_settings')
+  })
+
+  it('keeps the creating label while report creation runs', async () => {
+    const { report } = await listWithReport(false)
+
+    expect(report).toMatchObject({ generationPaused: false, label: 'Đang tạo báo cáo', status: 'generating' })
+  })
+})

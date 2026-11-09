@@ -15,7 +15,9 @@ export function createSurveyRouter(service: SurveyService, config: RuntimeConfig
           report: result.reportAccess ? {
             accessToken: result.reportAccess.accessToken,
             accessTokenExpiresAt: result.reportAccess.accessTokenExpiresAt,
+            deferredResultDays: result.reportAccess.deferredResultDays,
             jobId: result.reportAccess.jobId,
+            resultDeferred: result.reportAccess.resultDeferred,
             status: result.reportAccess.status,
           } : null,
           submissionId: result.id,
