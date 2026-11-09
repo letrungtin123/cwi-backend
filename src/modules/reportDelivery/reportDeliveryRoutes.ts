@@ -39,8 +39,10 @@ function mapRepositoryError(error: unknown) {
   return error
 }
 
-function exposeStatus(status: Awaited<ReturnType<PgReportDeliveryRepository['getStatus']>>) {
-  status.file.downloadUrl = status.file.available ? `/api/v1/admin/report-delivery/submissions/${status.submissionId}/report-pdf` : null
+// Viewers see whether a PDF exists and whether the email went out, but get no
+// link: downloading the file is for admins only.
+function exposeStatus(status: Awaited<ReturnType<PgReportDeliveryRepository['getStatus']>>, canDownload = true) {
+  status.file.downloadUrl = canDownload && status.file.available ? `/api/v1/admin/report-delivery/submissions/${status.submissionId}/report-pdf` : null
   return status
 }
 
@@ -59,22 +61,22 @@ export function createReportDeliveryRouter(
   router.get('/submissions/status', async (req, res, next) => {
     try {
       enabled(config)
-      assertAdmin(req)
+      const canDownload = canManageContent(getRequiredAdminSession(req).user.role)
       const raw = typeof req.query.ids === 'string' ? req.query.ids.split(',').map((id) => id.trim()).filter(Boolean) : []
       if (!raw.length || raw.length > 100 || raw.some((id) => !uuidPattern.test(id))) throw new HttpError(400, 'invalid_submission_ids', 'ids phải chứa từ 1 đến 100 mã lượt gửi hợp lệ.')
       const rows = await repository.getStatuses(raw)
       res.setHeader('Cache-Control', 'no-store')
-      res.json({ data: rows.map((row) => exposeStatus(row)) })
+      res.json({ data: rows.map((row) => exposeStatus(row, canDownload)) })
     } catch (error) { next(mapRepositoryError(error)) }
   })
 
   router.get('/submissions/:submissionId/status', async (req, res, next) => {
     try {
       enabled(config)
-      assertAdmin(req)
+      const canDownload = canManageContent(getRequiredAdminSession(req).user.role)
       const status = await repository.getStatus(assertUuid(req.params.submissionId, 'invalid_submission_id'))
       res.setHeader('Cache-Control', 'no-store')
-      res.json({ data: exposeStatus(status) })
+      res.json({ data: exposeStatus(status, canDownload) })
     } catch (error) { next(mapRepositoryError(error)) }
   })
 

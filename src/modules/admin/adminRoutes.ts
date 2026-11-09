@@ -275,6 +275,7 @@ export function createAdminRouter(
 
   router.get('/report-jobs/:id/pdf', async (req, res, next) => {
     try {
+      if (!canManageContent(getRequiredAdminSession(req).user.role)) throw new HttpError(403, 'admin_required', 'Bạn không có quyền tải file báo cáo.')
       const id = assertUuid(req.params.id, 'invalid_report_job_id', 'Report job id must be a UUID.')
       const reportJob = await reportRepository.getReportJobDownload(id)
       if (!reportJob) throw new HttpError(404, 'report_pdf_not_found', 'Report PDF is not available.')
