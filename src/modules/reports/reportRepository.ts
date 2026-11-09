@@ -33,6 +33,18 @@ export type ClaimedReportJob = {
   submissionId: string
 }
 
+// Dashboard switch for calling cwi-ai. While aiCallsEnabled is false the worker
+// leaves every job waiting and the survey says the report arrives by email within
+// deferredResultDays; turning it back on processes the waiting jobs as before.
+export type ReportGenerationSettings = {
+  aiCallsEnabled: boolean
+  deferredResultDays: number
+  updatedAt: string | null
+  updatedByEmail: string | null
+}
+
+export type ReportGenerationSettingsUpdate = Pick<ReportGenerationSettings, 'aiCallsEnabled' | 'deferredResultDays'>
+
 export type ReportJobDownload = {
   id: string
   pdfStoragePath: string
@@ -90,6 +102,13 @@ type ReportJobDownloadRow = {
   submission_id: string
 }
 
+type ReportGenerationSettingsRow = {
+  ai_calls_enabled: boolean
+  deferred_result_days: number
+  updated_at: Date
+  updated_by_email: string | null
+}
+
 const readyStatuses: ReportJobStatusValue[] = [
   'pending',
   'queued_ai',
@@ -98,6 +117,31 @@ const readyStatuses: ReportJobStatusValue[] = [
   'html_ready',
   'generating_pdf',
 ]
+
+// Jobs cwi-ai is still generating; caps how many new jobs are sent to it at once.
+const aiInFlightStatuses: ReportJobStatusValue[] = ['queued_ai', 'generating_ai', 'rendering_assets']
+
+// Used until the settings row exists: calls on, which is the behaviour before the switch.
+const defaultGenerationSettings: ReportGenerationSettings = {
+  aiCallsEnabled: true,
+  deferredResultDays: 7,
+  updatedAt: null,
+  updatedByEmail: null,
+}
+
+export function isUnfinishedReportStatus(status: ReportJobStatusValue) {
+  return readyStatuses.includes(status)
+}
+
+function mapGenerationSettings(row: ReportGenerationSettingsRow | undefined): ReportGenerationSettings {
+  if (!row) return defaultGenerationSettings
+  return {
+    aiCallsEnabled: row.ai_calls_enabled,
+    deferredResultDays: row.deferred_result_days,
+    updatedAt: row.updated_at.toISOString(),
+    updatedByEmail: row.updated_by_email,
+  }
+}
 
 function mapClaimedJob(row: ClaimedReportJobRow): ClaimedReportJob {
   return {
@@ -233,7 +277,43 @@ export class PgReportRepository {
     }
   }
 
-  async claimNextReadyJob(workerId: string, lockMs: number): Promise<ClaimedReportJob | null> {
+  async getGenerationSettings(): Promise<ReportGenerationSettings> {
+    const result = await this.pool.query<ReportGenerationSettingsRow>(
+      `
+      SELECT ai_calls_enabled, deferred_result_days, updated_by_email, updated_at
+      FROM public.cwi_report_generation_settings
+      WHERE id = true
+      `,
+    )
+    return mapGenerationSettings(result.rows[0])
+  }
+
+  async saveGenerationSettings(input: ReportGenerationSettingsUpdate, updatedByEmail: string): Promise<ReportGenerationSettings> {
+    const result = await this.pool.query<ReportGenerationSettingsRow>(
+      `
+      INSERT INTO public.cwi_report_generation_settings (id, ai_calls_enabled, deferred_result_days, updated_by_email)
+      VALUES (true, $1, $2, $3)
+      ON CONFLICT (id) DO UPDATE
+      SET ai_calls_enabled = EXCLUDED.ai_calls_enabled,
+          deferred_result_days = EXCLUDED.deferred_result_days,
+          updated_by_email = EXCLUDED.updated_by_email
+      RETURNING ai_calls_enabled, deferred_result_days, updated_by_email, updated_at
+      `,
+      [input.aiCallsEnabled, input.deferredResultDays, updatedByEmail],
+    )
+    return mapGenerationSettings(result.rows[0])
+  }
+
+  // Submissions still waiting for their report, including the ones sent to cwi-ai.
+  async countUnfinishedJobs(): Promise<number> {
+    const result = await this.pool.query<{ count: string }>(
+      'SELECT count(*) AS count FROM public.cwi_report_jobs WHERE status = ANY($1::text[])',
+      [readyStatuses],
+    )
+    return Number(result.rows[0]?.count ?? 0)
+  }
+
+  async claimNextReadyJob(workerId: string, lockMs: number, maxAiInFlight: number): Promise<ClaimedReportJob | null> {
     const result = await this.pool.query<ClaimedReportJobRow>(
       `
       WITH candidate AS (
@@ -242,6 +322,10 @@ export class PgReportRepository {
         WHERE status = ANY($1::text[])
           AND (next_poll_at IS NULL OR next_poll_at <= now())
           AND (locked_at IS NULL OR locked_at < now() - ($2::double precision * interval '1 millisecond'))
+          AND (
+            status <> 'pending'
+            OR (SELECT count(*) FROM public.cwi_report_jobs AS in_flight WHERE in_flight.status = ANY($4::text[])) < $5
+          )
         ORDER BY created_at ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED
@@ -265,7 +349,7 @@ export class PgReportRepository {
         job.html_storage_path,
         (SELECT submission.language FROM public.cwi_survey_submissions AS submission WHERE submission.id = job.submission_id) AS language
       `,
-      [readyStatuses, lockMs, workerId],
+      [readyStatuses, lockMs, workerId, aiInFlightStatuses, maxAiInFlight],
     )
 
     const row = result.rows[0]

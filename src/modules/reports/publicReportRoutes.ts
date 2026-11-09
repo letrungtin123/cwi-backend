@@ -4,6 +4,7 @@ import { Router, type Request } from 'express'
 import { HttpError } from '../../http/errors.js'
 import type { ReportAccessTokenService } from './reportAccessToken.js'
 import { ReportAssetStorageError, type ReportAssetStorage } from './reportAssetStorage.js'
+import { reportDeferral } from './reportDeferral.js'
 import type { PgReportRepository } from './reportRepository.js'
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -39,16 +40,19 @@ export function createPublicReportRouter(
       assertAccess(req, jobId, accessTokens)
       const job = await repository.getPublicReportJob(jobId)
       if (!job) throw new HttpError(404, 'report_not_found', 'Báo cáo không tồn tại hoặc quyền truy cập đã hết hạn.')
+      const deferral = reportDeferral(job.status, await repository.getGenerationSettings())
 
       res.setHeader('Cache-Control', 'no-store')
       res.json({
         data: {
           createdAt: job.createdAt,
+          deferredResultDays: deferral.deferredResultDays,
           emailStatus: job.emailStatus,
           htmlAvailable: job.htmlAvailable,
           jobId: job.id,
           pdfAvailable: job.pdfAvailable,
           reportType: job.reportType,
+          resultDeferred: deferral.resultDeferred,
           status: job.status,
           updatedAt: job.updatedAt,
         },

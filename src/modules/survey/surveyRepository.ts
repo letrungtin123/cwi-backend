@@ -23,7 +23,9 @@ export type SubmissionCreateResult = {
   reportAccess?: {
     accessToken: string
     accessTokenExpiresAt: string
+    deferredResultDays: number | null
     jobId: string
+    resultDeferred: boolean
     status: string
   }
   reportJob: {

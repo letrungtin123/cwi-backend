@@ -44,6 +44,7 @@ function createWorker(
       initialPollDelayMs: 1000,
       lockMs: 30000,
       loopIntervalMs: 1000,
+      maxAiInFlight: 3,
       maxAttempts,
       maxPollDelayMs: 60000,
     },
@@ -164,5 +165,48 @@ describe('ReportWorker AI failure handling', () => {
 
     expect(repository.markFailed).toHaveBeenCalledWith('job-1', 1, 'invalid_request', 'AI report job failed.')
     expect(repository.markRetry).not.toHaveBeenCalled()
+  })
+})
+
+describe('ReportWorker cwi-ai switch', () => {
+  function settings(aiCallsEnabled: boolean) {
+    return { aiCallsEnabled, deferredResultDays: 7, updatedAt: null, updatedByEmail: null }
+  }
+
+  async function tick(worker: ReportWorker) {
+    await (worker as unknown as { tick: () => Promise<void> }).tick()
+    worker.stop()
+  }
+
+  it('claims no job and calls nothing while cwi-ai calls are turned off', async () => {
+    const repository = {
+      claimNextReadyJob: vi.fn(),
+      getGenerationSettings: vi.fn().mockResolvedValue(settings(false)),
+    } as unknown as PgReportRepository
+    const client = { getJob: vi.fn(), submitReport: vi.fn() } as unknown as ReportServiceClient
+    const worker = createWorker(client, repository)
+
+    await tick(worker)
+
+    expect(repository.claimNextReadyJob).not.toHaveBeenCalled()
+    expect(client.submitReport).not.toHaveBeenCalled()
+    expect(client.getJob).not.toHaveBeenCalled()
+  })
+
+  it('sends a waiting job to cwi-ai once the calls are turned back on, capped by maxAiInFlight', async () => {
+    const pendingJob = { ...createJob(), aiJobId: null, status: 'pending' as const }
+    const repository = {
+      claimNextReadyJob: vi.fn().mockResolvedValue(pendingJob),
+      getGenerationSettings: vi.fn().mockResolvedValue(settings(true)),
+      markAccepted: vi.fn(),
+    } as unknown as PgReportRepository
+    const client = { submitReport: vi.fn().mockResolvedValue({ job_id: 'ai-job-2', status_url: '/v3/report-jobs/ai-job-2' }) } as unknown as ReportServiceClient
+    const worker = createWorker(client, repository)
+
+    await tick(worker)
+
+    expect(repository.claimNextReadyJob).toHaveBeenCalledWith(expect.any(String), 30000, 3)
+    expect(client.submitReport).toHaveBeenCalledWith('/v3/reports/anonymous', {})
+    expect(repository.markAccepted).toHaveBeenCalledOnce()
   })
 })

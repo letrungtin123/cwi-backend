@@ -6,6 +6,8 @@ import { surveyTextEn } from '../survey/surveyQuestionsEn.js'
 
 export type ReportSummary = {
   errorMessage: string | null
+  /** True while report creation is paused in the dashboard and this report is still waiting. */
+  generationPaused?: boolean
   jobId: string | null
   label: string
   pdfAvailable: boolean
@@ -91,6 +93,7 @@ type SubmissionRow = {
   phone: string | null
   position: string
   privacy_consent: string
+  report_generation_paused: boolean | null
   report_job_id: string | null
   report_last_error_message: string | null
   report_pdf_uploaded: boolean
@@ -235,6 +238,7 @@ type RoundtableRegistrationRow = {
   quarter: string | null
   registered_at: Date
   speaker_question: string | null
+  report_generation_paused: boolean | null
   report_job_id: string | null
   report_last_error_message: string | null
   report_pdf_storage_path: string | null
@@ -295,7 +299,8 @@ const submissionSelect = `
     report.status AS report_status,
     report.updated_at AS report_updated_at,
     report.pdf_storage_path AS report_pdf_storage_path,
-    COALESCE(report.last_error_message, report.error_message) AS report_last_error_message
+    COALESCE(report.last_error_message, report.error_message) AS report_last_error_message,
+    COALESCE((SELECT NOT settings.ai_calls_enabled FROM public.cwi_report_generation_settings AS settings WHERE settings.id), false) AS report_generation_paused
   FROM public.cwi_survey_submissions AS s
   LEFT JOIN LATERAL (
     SELECT id, status, updated_at, pdf_storage_path, last_error_message, error_message
@@ -334,7 +339,8 @@ const roundtableSelect = `
     report.status AS report_status,
     report.updated_at AS report_updated_at,
     report.pdf_storage_path AS report_pdf_storage_path,
-    COALESCE(report.last_error_message, report.error_message) AS report_last_error_message
+    COALESCE(report.last_error_message, report.error_message) AS report_last_error_message,
+    COALESCE((SELECT NOT settings.ai_calls_enabled FROM public.cwi_report_generation_settings AS settings WHERE settings.id), false) AS report_generation_paused
   FROM public.cwi_roundtable_registrations AS r
   LEFT JOIN public.cwi_survey_submissions AS s ON s.id = r.submission_id
   LEFT JOIN LATERAL (
@@ -353,6 +359,22 @@ const webinarSelect = roundtableSelect
 
 function toIso(value: Date) {
   return value.toISOString()
+}
+
+// A report job that has not finished yet. While report creation is paused in the
+// dashboard nothing is being created, so it reads "waiting" instead of "creating".
+function unfinishedReportSummary(row: Pick<SubmissionRow, 'report_generation_paused' | 'report_job_id' | 'report_last_error_message' | 'report_updated_at'>): ReportSummary {
+  const generationPaused = row.report_generation_paused === true
+  return {
+    errorMessage: row.report_last_error_message,
+    generationPaused,
+    jobId: row.report_job_id,
+    label: generationPaused ? 'Chờ tạo báo cáo' : 'Đang tạo báo cáo',
+    pdfAvailable: false,
+    pdfDownloadUrl: null,
+    status: 'generating',
+    updatedAt: row.report_updated_at ? toIso(row.report_updated_at) : null,
+  }
 }
 
 function mapReportSummary(row: SubmissionRow): ReportSummary {
@@ -405,15 +427,7 @@ function mapReportSummary(row: SubmissionRow): ReportSummary {
     }
   }
 
-  return {
-    errorMessage: row.report_last_error_message,
-    jobId: row.report_job_id,
-    label: 'Đang tạo báo cáo',
-    pdfAvailable: false,
-    pdfDownloadUrl: null,
-    status: 'generating',
-    updatedAt: row.report_updated_at ? toIso(row.report_updated_at) : null,
-  }
+  return unfinishedReportSummary(row)
 }
 
 function mapListItem(row: SubmissionRow): SubmissionListItem {
@@ -488,15 +502,7 @@ function mapRoundtableReportSummary(row: RoundtableRegistrationRow): ReportSumma
     }
   }
 
-  return {
-    errorMessage: row.report_last_error_message,
-    jobId: row.report_job_id,
-    label: 'Đang tạo báo cáo',
-    pdfAvailable: false,
-    pdfDownloadUrl: null,
-    status: 'generating',
-    updatedAt: row.report_updated_at ? toIso(row.report_updated_at) : null,
-  }
+  return unfinishedReportSummary(row)
 }
 
 function mapRoundtableLinkedSubmission(row: RoundtableRegistrationRow): RoundtableSubmissionSummary | null {

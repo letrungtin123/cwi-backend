@@ -121,7 +121,7 @@ const reportMailer = new SmtpReportMailer({
 
 const reportAccessTokenService = new ReportAccessTokenService(config.reportPublicTokenSecret, config.reportPublicTokenTtlSeconds)
 const quarterlyReportDownloadTokenService = new QuarterlyReportDownloadTokenService(config.quarterlyReportDownloadTokenSecret, config.quarterlyReportDownloadTokenTtlSeconds)
-const surveyService = new SurveyService(surveyRepository, { reportAccessTokenService, reportServiceEnabled: env.reportServiceEnabled })
+const surveyService = new SurveyService(surveyRepository, { reportAccessTokenService, reportServiceEnabled: env.reportServiceEnabled, reportSettings: reportRepository })
 const roundtableService = new RoundtableService(roundtableRepository)
 const webinarService = new WebinarService(webinarRepository)
 const app = createApp({ adminRepository, authService, config, exportRepository, logger, pool, quarterlyReportDownloadTokenService, quarterlyReportRepository, quarterlyReportStorage, reportAccessTokenService, reportAssetStorage, submissionReportStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, surveyService, webinarService })

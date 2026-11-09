@@ -18,6 +18,7 @@ export type ReportWorkerConfig = {
   initialPollDelayMs: number
   lockMs: number
   loopIntervalMs: number
+  maxAiInFlight: number
   maxAttempts: number
   maxPollDelayMs: number
 }
@@ -85,6 +86,7 @@ function minimalReportForStorage(report: CompletedReport) {
 
 export class ReportWorker {
   private readonly workerId = `cwi-report-worker-${process.pid}-${randomUUID()}`
+  private aiCallsPaused: boolean | null = null
   private isRunning = false
   private isStopping = false
   private timer: NodeJS.Timeout | null = null
@@ -115,7 +117,14 @@ export class ReportWorker {
     this.isRunning = true
 
     try {
-      const job = await this.dependencies.repository.claimNextReadyJob(this.workerId, this.dependencies.config.lockMs)
+      // Every job step calls cwi-ai, so while the dashboard switch is off no job is
+      // claimed; waiting jobs keep their state and resume when it is turned back on.
+      const settings = await this.dependencies.repository.getGenerationSettings()
+      this.noteAiCallsPaused(!settings.aiCallsEnabled)
+      if (!settings.aiCallsEnabled) return
+
+      const { lockMs, maxAiInFlight } = this.dependencies.config
+      const job = await this.dependencies.repository.claimNextReadyJob(this.workerId, lockMs, maxAiInFlight)
       if (job) await this.processJob(job)
     } catch (error) {
       this.dependencies.logger.error({ error }, 'Report worker tick failed')
@@ -123,6 +132,13 @@ export class ReportWorker {
       this.isRunning = false
       this.schedule(this.dependencies.config.loopIntervalMs)
     }
+  }
+
+  private noteAiCallsPaused(paused: boolean) {
+    if (paused === this.aiCallsPaused) return
+    if (paused) this.dependencies.logger.warn({ workerId: this.workerId }, 'Report generation paused: cwi-ai calls are turned off in the dashboard')
+    else if (this.aiCallsPaused !== null) this.dependencies.logger.info({ workerId: this.workerId }, 'Report generation resumed: cwi-ai calls are turned on')
+    this.aiCallsPaused = paused
   }
 
   private async processJob(job: ClaimedReportJob) {
