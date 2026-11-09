@@ -159,11 +159,14 @@ export class PgSurveyRepository implements SurveyRepository {
           client_meta,
           survey_version,
           company_name,
-          language
+          language,
+          survey_source_id
         )
         VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-          $12, $13, $14::jsonb, $15, $16, $17, $18, $19, $20::jsonb, $21, $22, $23
+          $12, $13, $14::jsonb, $15, $16, $17, $18, $19, $20::jsonb, $21, $22, $23,
+          -- An unknown or disabled source code leaves the submission without a source.
+          (SELECT source.id FROM public.cwi_survey_sources AS source WHERE source.code = $24 AND source.is_active)
         )
         RETURNING id, submitted_at
         `,
@@ -187,10 +190,12 @@ export class PgSurveyRepository implements SurveyRepository {
           meta.source,
           meta.clientIpHash,
           meta.userAgent,
-          JSON.stringify(input.clientMeta),
+          // The received code is kept with the client details even when it matches no source.
+          JSON.stringify(input.sourceCode ? { ...input.clientMeta, surveySourceCode: input.sourceCode } : input.clientMeta),
           input.surveyVersion,
           input.participant.companyName,
           input.language,
+          input.sourceCode,
         ],
       )
 

@@ -121,6 +121,28 @@ export class PgAuthRepository {
     )
   }
 
+  async getAuthUserId(adminUserId: string): Promise<string | null> {
+    const result = await this.pool.query<{ auth_user_id: string }>(
+      'SELECT auth_user_id FROM public.cwi_admin_users WHERE id = $1 AND is_active = true',
+      [adminUserId],
+    )
+    return result.rows[0]?.auth_user_id ?? null
+  }
+
+  // After a password change: every other session of this account is signed out.
+  async revokeOtherSessions(adminUserId: string, keepSessionId: string): Promise<void> {
+    await this.pool.query(
+      `
+      UPDATE public.cwi_admin_sessions
+      SET revoked_at = now(), updated_at = now()
+      WHERE admin_user_id = $1
+        AND id <> $2
+        AND revoked_at IS NULL
+      `,
+      [adminUserId, keepSessionId],
+    )
+  }
+
   async touchLogin(adminUserId: string): Promise<void> {
     await this.pool.query(
       `

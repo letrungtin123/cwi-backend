@@ -153,7 +153,10 @@ function createSheetWriter(workbook: ExcelJS.stream.xlsx.WorkbookWriter, name: s
   }
 }
 
-function addOverview(workbook: ExcelJS.stream.xlsx.WorkbookWriter, job: ClaimedExportJob) {
+// Shown for a submission that came without a source link.
+export const NO_SURVEY_SOURCE_LABEL = 'Không có'
+
+function addOverview(workbook: ExcelJS.stream.xlsx.WorkbookWriter, job: ClaimedExportJob, sourceFilterLabel: string) {
   const sheet = workbook.addWorksheet('Tổng quan', { views: [{ state: 'frozen', ySplit: 1 }] })
   sheet.columns = [
     { header: 'Thông tin', key: 'label', width: 30 },
@@ -169,6 +172,7 @@ function addOverview(workbook: ExcelJS.stream.xlsx.WorkbookWriter, job: ClaimedE
     ['Trạng thái lọc', filters.status ? statusLabel(filters.status) : 'Tất cả trạng thái'],
     ...(job.dataset === 'submissions' ? [['Quý khảo sát', filters.surveyVersion ?? 'Tất cả quý'] as CellValue[]] : []),
     ...(job.dataset === 'roundtable' ? [['Quý Roundtable', filters.quarter ?? 'Tất cả quý'] as CellValue[]] : []),
+    ...(job.dataset === 'submissions' ? [['Nguồn mời', sourceFilterLabel] as CellValue[]] : []),
     ...(job.dataset === 'submissions' ? [['Đăng ký Roundtable', filters.roundtableRegistered === undefined ? 'Tất cả' : yesNo(filters.roundtableRegistered)] as CellValue[]] : []),
     ['Tình trạng liên kết', filters.linkStatus === undefined ? 'Tất cả' : filters.linkStatus === 'linked' ? 'Đã khảo sát' : 'Đăng ký riêng'],
     ['Từ khóa tìm kiếm', filters.search ? sanitizeExcelCell(filters.search) : 'Không lọc'],
@@ -181,7 +185,12 @@ function addOverview(workbook: ExcelJS.stream.xlsx.WorkbookWriter, job: ClaimedE
   sheet.commit()
 }
 
-function buildSubmissionValues(row: {
+export const submissionColumns = {
+  headers: ['Quý khảo sát', 'Họ tên', 'Email', 'Số điện thoại', 'Tên công ty', 'Chức vụ', 'Nguồn mời', 'Trạng thái khảo sát', 'Ghi chú trạng thái', 'Bảo mật dữ liệu', 'Đã trả lời Phần 1', 'Đã trả lời Phần 2', 'Số câu trả lời', 'Đăng ký Roundtable', 'Trạng thái báo cáo', 'Thời gian gửi'],
+  widths: [14, 24, 30, 18, 30, 24, 26, 34, 38, 18, 18, 18, 15, 20, 22, 20],
+}
+
+export function buildSubmissionValues(row: {
   answers_count: number
   company_name: string | null
   email: string
@@ -196,6 +205,7 @@ function buildSubmissionValues(row: {
   status_note: string
   submission_status: string
   submitted_at: Date
+  survey_source_name: string | null
   survey_version: string
 }) {
   return [
@@ -205,6 +215,7 @@ function buildSubmissionValues(row: {
     row.phone ?? '',
     row.company_name ?? '',
     row.position,
+    row.survey_source_name ?? NO_SURVEY_SOURCE_LABEL,
     statusLabel(row.submission_status),
     row.status_note,
     consentLabel(row.privacy_consent),
@@ -288,6 +299,12 @@ export class ExportWorkbookService {
     private readonly storage: ReportAssetStorage,
   ) {}
 
+  private async sourceFilterLabel(filters: ExportFilters) {
+    if (!filters.sourceId) return 'Tất cả nguồn'
+    if (filters.sourceId === 'none') return 'Không có nguồn mời'
+    return (await this.repository.getSurveySourceName(filters.sourceId)) ?? 'Nguồn đã bị xóa'
+  }
+
   async generate(job: ClaimedExportJob): Promise<ExportGenerationResult> {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'cwi-export-'))
     const filePath = join(temporaryDirectory, job.file_name ?? 'du-lieu.xlsx')
@@ -298,13 +315,11 @@ export class ExportWorkbookService {
     })
 
     try {
-      addOverview(workbook, job)
+      addOverview(workbook, job, await this.sourceFilterLabel(job.filters))
       const registrationLabel = job.dataset === 'roundtable' ? 'Roundtable' : 'Webinar'
       const eventColumns = job.dataset === 'submissions' ? null : eventRegistrationColumns(job.dataset)
-      const primaryHeaders = eventColumns
-        ? eventColumns.headers
-        : ['Quý khảo sát', 'Họ tên', 'Email', 'Số điện thoại', 'Tên công ty', 'Chức vụ', 'Trạng thái khảo sát', 'Ghi chú trạng thái', 'Bảo mật dữ liệu', 'Đã trả lời Phần 1', 'Đã trả lời Phần 2', 'Số câu trả lời', 'Đăng ký Roundtable', 'Trạng thái báo cáo', 'Thời gian gửi']
-      const primaryWidths = eventColumns ? eventColumns.widths : [14, 24, 30, 18, 30, 24, 34, 38, 18, 18, 18, 15, 20, 22, 20]
+      const primaryHeaders = eventColumns ? eventColumns.headers : submissionColumns.headers
+      const primaryWidths = eventColumns ? eventColumns.widths : submissionColumns.widths
       const primarySheet = createSheetWriter(workbook, job.dataset === 'submissions' ? 'Lượt gửi khảo sát' : `Đăng ký ${registrationLabel}`, primaryHeaders, primaryWidths)
       const answerSheet =
         job.dataset === 'submissions'

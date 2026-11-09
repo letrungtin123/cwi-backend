@@ -7,6 +7,14 @@ import { HttpError } from '../../http/errors.js'
 import type { AuthService } from './authService.js'
 import { clearAuthCookies, setAuthCookies } from './cookies.js'
 
+// 8..72: Supabase Auth hashes with bcrypt, which only uses the first 72 bytes.
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1).max(512),
+    newPassword: z.string().min(8).max(72),
+  })
+  .strict()
+
 const loginSchema = z.object({
   email: z.string().trim().email().max(254),
   password: z.string().min(1).max(512),
@@ -59,6 +67,30 @@ export function createAuthRouter(authService: AuthService, config: RuntimeConfig
       next(error)
     }
   })
+
+  router.post(
+    '/change-password',
+    requireSession,
+    rateLimit({
+      keyGenerator: (req) => getRequiredAdminSession(req).id,
+      legacyHeaders: false,
+      limit: config.auth.loginRateLimitMax,
+      standardHeaders: 'draft-7',
+      windowMs: config.auth.loginRateLimitWindowMs,
+    }),
+    async (req, res, next) => {
+      try {
+        const parsed = changePasswordSchema.safeParse(req.body)
+        if (!parsed.success) {
+          throw new HttpError(422, 'invalid_password_change', 'Mật khẩu mới cần từ 8 đến 72 ký tự.')
+        }
+        await authService.changePassword(getRequiredAdminSession(req), parsed.data, getAuthRequestMeta(req, config))
+        res.status(204).send()
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
 
   router.post('/logout', requireSession, async (req, res, next) => {
     try {

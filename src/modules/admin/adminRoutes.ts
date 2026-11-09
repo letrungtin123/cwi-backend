@@ -11,6 +11,7 @@ import type { PgExportRepository } from '../exports/exportRepository.js'
 import { ReportAssetStorageError, type ReportAssetStorage } from '../reports/reportAssetStorage.js'
 import { ReportRetryError, type PgReportRepository } from '../reports/reportRepository.js'
 import type { PgAdminRepository, ReportStatusFilter } from './adminRepository.js'
+import { canManageContent } from '../auth/adminRoles.js'
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const validStatuses = new Set(['part1_only', 'part2_refused_privacy', 'full_private_report'])
@@ -110,6 +111,13 @@ export function parseQuarter(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
   if (/^[0-9]{4}Q[1-4]$/.test(value)) return value
   throw new HttpError(400, 'invalid_quarter_filter', 'quarter filter must look like 2026Q4.')
+}
+
+// 'none' lists submissions that came without a source link.
+export function parseSourceFilter(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  if (value === 'none' || uuidPattern.test(value)) return value
+  throw new HttpError(400, 'invalid_source_filter', 'sourceId filter must be a source id or none.')
 }
 
 export function parseEmailStatus(value: unknown) {
@@ -289,7 +297,7 @@ export function createAdminRouter(
   router.post('/survey-submissions/:id/retry-report', async (req, res, next) => {
     try {
       const session = getRequiredAdminSession(req)
-      if (session.user.role !== 'admin') throw new HttpError(403, 'admin_required', 'Bạn không có quyền tạo lại báo cáo.')
+      if (!canManageContent(session.user.role)) throw new HttpError(403, 'admin_required', 'Bạn không có quyền tạo lại báo cáo.')
       const id = assertUuid(req.params.id, 'invalid_submission_id', 'Submission id must be a UUID.')
       const data = await reportRepository.retryFailedJob(id)
       res.status(202).json({ data })
@@ -313,6 +321,7 @@ export function createAdminRouter(
         reportPdfUploaded: parseReportPdfUploaded(req.query.reportPdfUploaded),
         roundtableRegistered: parseRoundtable(req.query.roundtable),
         search: parseSearch(req.query.search),
+        sourceId: parseSourceFilter(req.query.sourceId),
         status: parseStatus(req.query.status),
         surveyVersion: parseSurveyVersion(req.query.surveyVersion),
       })
@@ -332,6 +341,7 @@ export function createAdminRouter(
         reportPdfUploaded: parseReportPdfUploaded(req.query.reportPdfUploaded),
         roundtableRegistered: parseRoundtable(req.query.roundtable),
         search: parseSearch(req.query.search),
+        sourceId: parseSourceFilter(req.query.sourceId),
         status: parseStatus(req.query.status),
         surveyVersion: parseSurveyVersion(req.query.surveyVersion),
       })
@@ -353,6 +363,7 @@ export function createAdminRouter(
         reportPdfUploaded: parseReportPdfUploaded(req.query.reportPdfUploaded),
         roundtableRegistered: parseRoundtable(req.query.roundtable),
         search: parseSearch(req.query.search),
+        sourceId: parseSourceFilter(req.query.sourceId),
         status: parseStatus(req.query.status),
         surveyVersion: parseSurveyVersion(req.query.surveyVersion),
       })

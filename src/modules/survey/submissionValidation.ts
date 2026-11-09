@@ -20,6 +20,7 @@ import {
   type SubmissionStatus,
 } from './submissionStatus.js'
 import { getSurveyScores, type SurveyScores } from './surveyScoring.js'
+import { readSubmittedSurveySourceCode } from '../surveySources/surveySourceCode.js'
 
 export type Participant = {
   companyName: string | null
@@ -60,6 +61,9 @@ export type NormalizedSurveySubmission = {
   privacyConsent: PrivacyConsent
   roundtableRegistration: RoundtableRegistration | null
   scores: SurveyScores
+  // Invitation source code from the survey link, or null. Not part of payloadHash, so
+  // a retry is never refused because another source link was opened in between.
+  sourceCode: string | null
   statusNote: string
   submissionStatus: SubmissionStatus
   surveyVersion: string
@@ -102,6 +106,9 @@ const rawSubmissionSchema = z
       })
       .strict(),
     privacyConsent: z.enum(PRIVACY_CONSENTS),
+    // Any value is accepted here and invalid codes are dropped later, so a bad link
+    // never makes the submission fail.
+    sourceCode: z.unknown().optional(),
     roundtableRegistration: z
       .object({
         email: z.string().trim().email().max(254).optional(),
@@ -297,7 +304,7 @@ function assertAnswerSet(status: SubmissionStatus, answersByIdx: Map<number, Nor
   }
 }
 
-function hashPayload(value: Omit<NormalizedSurveySubmission, 'payloadHash'>) {
+function hashPayload(value: Omit<NormalizedSurveySubmission, 'payloadHash' | 'sourceCode'>) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
@@ -375,7 +382,7 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
     validationError('roundtable_email_mismatch', 'Roundtable registration email must match participant email.')
   }
 
-  const normalizedWithoutHash: Omit<NormalizedSurveySubmission, 'payloadHash'> = {
+  const normalizedWithoutHash: Omit<NormalizedSurveySubmission, 'payloadHash' | 'sourceCode'> = {
     answers: orderedAnswers,
     clientMeta: raw.clientMeta ?? {},
     idempotencyKey: idempotencyKey ?? null,
@@ -400,5 +407,6 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
   return {
     ...normalizedWithoutHash,
     payloadHash: hashPayload(normalizedWithoutHash),
+    sourceCode: readSubmittedSurveySourceCode(raw.sourceCode),
   }
 }
