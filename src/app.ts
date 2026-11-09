@@ -17,6 +17,8 @@ import { createAuthRouter } from './modules/auth/authRoutes.js'
 import { createAdminUserRouter } from './modules/adminUsers/adminUserRoutes.js'
 import { PgAdminUserRepository } from './modules/adminUsers/adminUserRepository.js'
 import { AdminUserService } from './modules/adminUsers/adminUserService.js'
+import { PgSubmissionDeletionRepository } from './modules/submissionDeletion/submissionDeletionRepository.js'
+import { createSubmissionDeletionRouter } from './modules/submissionDeletion/submissionDeletionRoutes.js'
 import type { AuthService } from './modules/auth/authService.js'
 import type { ReportAssetStorage } from './modules/reports/reportAssetStorage.js'
 import type { ReportAccessTokenService } from './modules/reports/reportAccessToken.js'
@@ -178,6 +180,7 @@ export function createApp(dependencies: AppDependencies) {
   app.use('/api/v1/admin/roundtable-event', createRoundtableEventAdminRouter(roundtableService, authService, config))
   app.use('/api/v1/admin/report-generation-settings', createReportGenerationSettingsAdminRouter(reportRepository, authService, config))
   app.use('/api/v1/admin/admin-users', createAdminUserRouter(new AdminUserService(new PgAdminUserRepository(pool), config.auth), authService, config))
+  app.use('/api/v1/admin/submission-deletions', createSubmissionDeletionRouter(new PgSubmissionDeletionRepository(pool), authService, config))
   app.use('/api/v1/admin/survey-sources', createSurveySourceAdminRouter(new PgSurveySourceRepository(pool), authService, config))
   app.use(handleNotFound)
   app.use(handleError(logger))
