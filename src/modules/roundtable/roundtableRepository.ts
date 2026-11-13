@@ -70,7 +70,7 @@ function dateToIso(value: Date | string) {
 
 function assertSamePayload(row: Pick<RoundtableRow, 'email' | 'payload_hash'>, input: NormalizedRoundtableRegistration) {
   if (row.email.trim().toLowerCase() !== input.email) {
-    throw new HttpError(409, 'roundtable_idempotency_key_conflict', 'Roundtable registration key does not match the registration email.')
+    throw new HttpError(409, 'roundtable_idempotency_key_conflict', 'Mã đăng ký CEO Roundtable không khớp với email đăng ký.')
   }
   if (row.payload_hash && row.payload_hash !== input.payloadHash) {
     throw new HttpError(
@@ -95,7 +95,7 @@ async function findSubmissionForInput(client: pg.PoolClient, input: NormalizedRo
 
     const row = result.rows[0]
     if (row && row.email.trim().toLowerCase() !== input.email) {
-      throw new HttpError(409, 'roundtable_survey_email_mismatch', 'Roundtable email must match the survey email.')
+      throw new HttpError(409, 'roundtable_survey_email_mismatch', 'Email đăng ký CEO Roundtable phải trùng với email khảo sát.')
     }
     // A submission of another quarter belongs to another Roundtable.
     return row && row.survey_version === input.quarter ? row.id : null
@@ -301,7 +301,7 @@ export class PgRoundtableRepository implements RoundtableRepository {
 
       const row = inserted.rows[0]
       if (!row) {
-        throw new HttpError(500, 'roundtable_insert_failed', 'Failed to create roundtable registration.')
+        throw new HttpError(500, 'roundtable_insert_failed', 'Không tạo được đăng ký CEO Roundtable.')
       }
 
       await syncSurveyRoundtableFlags(client, input.email, input.quarter)

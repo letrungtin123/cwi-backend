@@ -2,22 +2,17 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { Router } from 'express'
 import type { RuntimeConfig } from '../../config/runtime.js'
-import { getRequiredAdminSession } from '../../http/adminSession.js'
+import { getRequiredAdminSession, requireContentManager } from '../../http/adminSession.js'
 import { HttpError } from '../../http/errors.js'
 import type { ReportAssetStorage } from '../reports/reportAssetStorage.js'
 import { ReportAssetStorageError } from '../reports/reportAssetStorage.js'
 import { PgExportRepository } from './exportRepository.js'
 import { createExportSchema } from './exportTypes.js'
-import { canManageContent } from '../auth/adminRoles.js'
+import { uuidPattern } from '../../http/ids.js'
 
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function assertAdmin(req: Parameters<typeof getRequiredAdminSession>[0]) {
-  const session = getRequiredAdminSession(req)
-  if (!canManageContent(session.user.role)) {
-    throw new HttpError(403, 'export_forbidden', 'Chỉ quản trị viên mới được xuất dữ liệu.')
-  }
-  return session
+  return requireContentManager(req, new HttpError(403, 'export_forbidden', 'Chỉ quản trị viên mới được xuất dữ liệu.'))
 }
 
 function assertId(value: string | undefined) {

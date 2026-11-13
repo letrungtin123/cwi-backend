@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { HttpError } from '../../http/errors.js'
+import { normalizePhoneNumber } from '../shared/phone.js'
 
 export type NormalizedWebinarRegistration = {
   clientMeta: Record<string, unknown>
@@ -26,7 +27,6 @@ const idempotencyKeySchema = z
   .max(128)
   .regex(/^[A-Za-z0-9._:-]+$/)
 
-const phonePattern = /^(?:0\d{9,10}|\+[1-9]\d{7,14})$/
 
 const rawWebinarRegistrationSchema = z
   .object({
@@ -63,9 +63,8 @@ function normalizeText(value: string) {
 function normalizePhone(value: string | undefined) {
   if (!value) return null
 
-  const compact = value.replace(/[\s().-]/g, '')
-  if (/^0\d{9,10}$/.test(compact)) return `+84${compact.slice(1)}`
-  if (phonePattern.test(compact)) return compact
+  const normalized = normalizePhoneNumber(value)
+  if (normalized) return normalized
   validationError('invalid_webinar_phone', 'Số điện thoại không hợp lệ.')
 }
 
@@ -77,7 +76,7 @@ export function normalizeWebinarRegistration(payload: unknown, headerIdempotency
   const parsed = rawWebinarRegistrationSchema.safeParse(payload)
 
   if (!parsed.success) {
-    validationError('invalid_webinar_payload', 'Webinar registration payload is invalid.', {
+    validationError('invalid_webinar_payload', 'Thông tin đăng ký Webinar không hợp lệ.', {
       issues: parsed.error.issues.map((issue) => ({
         message: issue.message,
         path: issue.path,
@@ -93,13 +92,13 @@ export function normalizeWebinarRegistration(payload: unknown, headerIdempotency
   }
 
   if (raw.idempotencyKey && headerIdempotencyKey && raw.idempotencyKey !== headerIdempotencyKey) {
-    validationError('idempotency_key_mismatch', 'Body and header idempotency keys do not match.')
+    validationError('idempotency_key_mismatch', 'Mã chống gửi trùng trong nội dung và header không khớp.')
   }
 
   if (idempotencyKey) {
     const idempotencyKeyResult = idempotencyKeySchema.safeParse(idempotencyKey)
     if (!idempotencyKeyResult.success) {
-      validationError('invalid_idempotency_key', 'Idempotency key is invalid.')
+      validationError('invalid_idempotency_key', 'Mã chống gửi trùng không hợp lệ.')
     }
   }
 
@@ -125,7 +124,7 @@ export function normalizeWebinarEmailCheck(payload: unknown): NormalizedWebinarE
   const parsed = rawWebinarEmailCheckSchema.safeParse(payload)
 
   if (!parsed.success) {
-    validationError('invalid_webinar_email_check', 'Webinar email is invalid.')
+    validationError('invalid_webinar_email_check', 'Email đăng ký Webinar không hợp lệ.')
   }
 
   return { email: normalizeEmail(parsed.data.email) }

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { Router, type Request } from 'express'
+import { Router } from 'express'
 import type { RuntimeConfig } from '../../config/runtime.js'
-import { createAdminRequestRateLimit, getRequiredAdminSession, requireAdminSession } from '../../http/adminSession.js'
+import { createAdminRequestRateLimit, getRequiredAdminSession, requireContentManager, requireAdminSession } from '../../http/adminSession.js'
 import { HttpError } from '../../http/errors.js'
 import type { AuthService } from '../auth/authService.js'
 import { ReportAssetStorageError, type ReportAssetStorage } from '../reports/reportAssetStorage.js'
@@ -11,8 +11,8 @@ import type { SmtpReportMailer } from './smtpMailer.js'
 import { contentDispositionAttachment } from './reportDeliveryFilename.js'
 import { streamToResponse } from '../../http/streamResponse.js'
 import { canManageContent } from '../auth/adminRoles.js'
+import { uuidPattern } from '../../http/ids.js'
 
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function assertUuid(value: unknown, code: string) {
   if (typeof value !== 'string' || !uuidPattern.test(value)) throw new HttpError(400, code, 'Mã lượt gửi không hợp lệ.')
@@ -23,11 +23,6 @@ function enabled(config: RuntimeConfig) {
   if (!config.reportDeliveryEnabled) throw new HttpError(503, 'report_delivery_disabled', 'Tính năng gửi báo cáo hiện chưa được bật.')
 }
 
-function assertAdmin(req: Request) {
-  const session = getRequiredAdminSession(req)
-  if (!canManageContent(session.user.role)) throw new HttpError(403, 'admin_required', 'Bạn không có quyền thực hiện thao tác này.')
-  return session
-}
 
 function mapRepositoryError(error: unknown) {
   if (error instanceof ReportDeliveryRepositoryError) return new HttpError(error.statusCode, error.code, error.message)
@@ -86,7 +81,7 @@ export function createReportDeliveryRouter(
     let fileSaved = false
     try {
       enabled(config)
-      const session = assertAdmin(req)
+      const session = requireContentManager(req)
       const submissionId = assertUuid(req.params.submissionId, 'invalid_submission_id')
       upload = await parsePdfUpload(req, config.reportUploadMaxBytes)
       const now = new Date()
@@ -115,7 +110,7 @@ export function createReportDeliveryRouter(
   router.get('/submissions/:submissionId/report-pdf', async (req, res, next) => {
     try {
       enabled(config)
-      assertAdmin(req)
+      requireContentManager(req)
       const submissionId = assertUuid(req.params.submissionId, 'invalid_submission_id')
       const file = await repository.getDownloadRecord(submissionId)
       if (!file) throw new HttpError(404, 'report_pdf_missing', 'Lượt gửi này chưa có file PDF.')
@@ -138,7 +133,7 @@ export function createReportDeliveryRouter(
   router.post('/submissions/:submissionId/retry-email', async (req, res, next) => {
     try {
       enabled(config)
-      assertAdmin(req)
+      requireContentManager(req)
       const submissionId = assertUuid(req.params.submissionId, 'invalid_submission_id')
       const status = await repository.retryEmail(submissionId)
       res.status(202).json({ data: exposeStatus(status) })
@@ -148,7 +143,7 @@ export function createReportDeliveryRouter(
   router.post('/campaigns/preview', async (req, res, next) => {
     try {
       enabled(config)
-      const session = assertAdmin(req)
+      const session = requireContentManager(req)
       const campaign = await repository.createPreview(session.user.id)
       res.setHeader('Cache-Control', 'no-store')
       res.json({ data: campaign })
@@ -158,7 +153,7 @@ export function createReportDeliveryRouter(
   router.post('/campaigns/:campaignId/confirm', async (req, res, next) => {
     try {
       enabled(config)
-      const session = assertAdmin(req)
+      const session = requireContentManager(req)
       const campaign = await repository.confirmCampaign(assertUuid(req.params.campaignId, 'invalid_campaign_id'), session.user.id)
       res.status(202).json({ data: campaign })
     } catch (error) { next(mapRepositoryError(error)) }
@@ -167,7 +162,7 @@ export function createReportDeliveryRouter(
   router.get('/campaigns/:campaignId', async (req, res, next) => {
     try {
       enabled(config)
-      assertAdmin(req)
+      requireContentManager(req)
       const campaign = await repository.getCampaign(assertUuid(req.params.campaignId, 'invalid_campaign_id'))
       res.setHeader('Cache-Control', 'no-store')
       res.json({ data: campaign })
@@ -177,7 +172,7 @@ export function createReportDeliveryRouter(
   router.post('/smtp/verify', async (req, res, next) => {
     try {
       enabled(config)
-      assertAdmin(req)
+      requireContentManager(req)
       await mailer.verify()
       res.json({ data: { status: 'ok' } })
     } catch (error) { next(mapRepositoryError(error)) }

@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { HttpError } from '../src/http/errors.js'
-import { buildAnonymousReportPayload } from '../src/modules/reports/anonymousReportPayload.js'
 import { normalizeRoundtableEmailCheck, normalizeRoundtableEventUpdate, normalizeRoundtableRegistration } from '../src/modules/roundtable/roundtableValidation.js'
 import { normalizeWebinarEmailCheck, normalizeWebinarRegistration } from '../src/modules/webinar/webinarValidation.js'
 import { buildReportObjectPaths } from '../src/modules/reports/reportAssetStorage.js'
-import { buildReportJobRequest } from '../src/modules/reports/reportPayload.js'
+import { buildAnonymousReportPayload, buildReportJobRequest } from '../src/modules/reports/reportPayload.js'
 import { normalizeSurveySubmission } from '../src/modules/survey/submissionValidation.js'
 
 function partOneAnswers() {

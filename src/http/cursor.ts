@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { HttpError } from './errors.js'
+import { uuidPattern } from './ids.js'
 
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 type CursorPayload = {
   id: string
@@ -14,7 +14,7 @@ function sign(value: string, secret: string) {
 }
 
 function invalidCursor(): never {
-  throw new HttpError(400, 'invalid_cursor', 'cursor must be a valid pagination cursor.')
+  throw new HttpError(400, 'invalid_cursor', 'Tham số phân trang (cursor) không hợp lệ.')
 }
 
 export function encodeCursor(secret: string, input: { id: string; timestamp: Date }) {

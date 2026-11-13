@@ -12,8 +12,8 @@ import { ReportAssetStorageError, type ReportAssetStorage } from '../reports/rep
 import { ReportRetryError, type PgReportRepository } from '../reports/reportRepository.js'
 import type { PgAdminRepository, ReportStatusFilter } from './adminRepository.js'
 import { canManageContent } from '../auth/adminRoles.js'
+import { uuidPattern } from '../../http/ids.js'
 
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const validStatuses = new Set(['part1_only', 'part2_refused_privacy', 'full_private_report'])
 const validRoundtableLinkStatuses = new Set(['linked', 'standalone'])
 const validEmailStatuses = new Set(['failed'])
@@ -21,49 +21,35 @@ const validReportStatuses = new Set(['not_started', 'generating', 'completed', '
 
 function parseLimit(value: unknown) {
   if (value === undefined) return 10
-  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) throw new HttpError(400, 'invalid_limit', 'limit must be a positive integer.')
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) throw new HttpError(400, 'invalid_limit', 'Số dòng mỗi trang (limit) phải là số nguyên dương.')
   const parsed = Number(value)
-  if (!Number.isSafeInteger(parsed) || parsed > 100) throw new HttpError(400, 'invalid_limit', 'limit must be between 1 and 100.')
-  return parsed
-}
-
-export function parseFullSubmissionLimit(value: unknown) {
-  const parsed = parseLimit(value)
-  if (parsed > 10) throw new HttpError(400, 'invalid_limit', 'limit must be between 1 and 10 for the full submissions endpoint.')
-  return parsed
-}
-
-function parsePage(value: unknown) {
-  if (value === undefined) return 1
-  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) throw new HttpError(400, 'invalid_page', 'page must be a positive integer.')
-  const parsed = Number(value)
-  if (!Number.isSafeInteger(parsed) || parsed > 10_000) throw new HttpError(400, 'invalid_page', 'page must be between 1 and 10000.')
+  if (!Number.isSafeInteger(parsed) || parsed > 100) throw new HttpError(400, 'invalid_limit', 'Số dòng mỗi trang (limit) phải từ 1 đến 100.')
   return parsed
 }
 
 function parseBefore(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
   const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) throw new HttpError(400, 'invalid_before_cursor', 'before must be an ISO timestamp.')
+  if (Number.isNaN(parsed.getTime())) throw new HttpError(400, 'invalid_before_cursor', 'Tham số before phải là thời điểm theo chuẩn ISO.')
   return parsed
 }
 
 function parseBeforeId(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
-  if (!uuidPattern.test(value)) throw new HttpError(400, 'invalid_before_cursor_id', 'beforeId must be a valid UUID.')
+  if (!uuidPattern.test(value)) throw new HttpError(400, 'invalid_before_cursor_id', 'Tham số beforeId phải là UUID hợp lệ.')
   return value
 }
 
 function parseBeforeCursor(beforeValue: unknown, beforeIdValue: unknown) {
   const before = parseBefore(beforeValue)
   const beforeId = parseBeforeId(beforeIdValue)
-  if (beforeId && !before) throw new HttpError(400, 'invalid_before_cursor', 'beforeId requires before.')
+  if (beforeId && !before) throw new HttpError(400, 'invalid_before_cursor', 'Tham số beforeId cần đi kèm before.')
   return { before, beforeId }
 }
 
 function parsePaginationCursor(cursorValue: unknown, beforeValue: unknown, beforeIdValue: unknown, secret: string) {
   if (cursorValue !== undefined) {
-    if (beforeValue !== undefined || beforeIdValue !== undefined) throw new HttpError(400, 'ambiguous_cursor', 'Use cursor or before/beforeId, not both.')
+    if (beforeValue !== undefined || beforeIdValue !== undefined) throw new HttpError(400, 'ambiguous_cursor', 'Chỉ dùng cursor hoặc before/beforeId, không dùng cả hai.')
     return decodeCursor(secret, cursorValue)
   }
   return parseBeforeCursor(beforeValue, beforeIdValue)
@@ -71,7 +57,7 @@ function parsePaginationCursor(cursorValue: unknown, beforeValue: unknown, befor
 
 function parseStatus(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
-  if (!validStatuses.has(value)) throw new HttpError(400, 'invalid_submission_status', 'submission_status filter is invalid.')
+  if (!validStatuses.has(value)) throw new HttpError(400, 'invalid_submission_status', 'Bộ lọc trạng thái lượt gửi không hợp lệ.')
   return value
 }
 
@@ -85,51 +71,51 @@ function parseRoundtable(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
   if (value === 'true') return true
   if (value === 'false') return false
-  throw new HttpError(400, 'invalid_roundtable_filter', 'roundtable filter must be true or false.')
+  throw new HttpError(400, 'invalid_roundtable_filter', 'Bộ lọc Roundtable chỉ nhận true hoặc false.')
 }
 
 export function parseReportPdfUploaded(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
   if (value === 'true') return true
   if (value === 'false') return false
-  throw new HttpError(400, 'invalid_report_pdf_uploaded_filter', 'reportPdfUploaded filter must be true or false.')
+  throw new HttpError(400, 'invalid_report_pdf_uploaded_filter', 'Bộ lọc file PDF chỉ nhận true hoặc false.')
 }
 
 export function parseReportStatus(value: unknown): ReportStatusFilter | null {
   if (typeof value !== 'string' || !value.trim()) return null
   if (validReportStatuses.has(value)) return value as ReportStatusFilter
-  throw new HttpError(400, 'invalid_report_status_filter', 'reportStatus filter is invalid.')
+  throw new HttpError(400, 'invalid_report_status_filter', 'Bộ lọc trạng thái báo cáo không hợp lệ.')
 }
 
 export function parseSurveyVersion(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
   if (/^[0-9]{4}Q[1-4]$/.test(value)) return value
-  throw new HttpError(400, 'invalid_survey_version_filter', 'surveyVersion filter must look like 2026Q4.')
+  throw new HttpError(400, 'invalid_survey_version_filter', 'Bộ lọc bộ câu hỏi phải có dạng 2026Q4.')
 }
 
 export function parseQuarter(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
   if (/^[0-9]{4}Q[1-4]$/.test(value)) return value
-  throw new HttpError(400, 'invalid_quarter_filter', 'quarter filter must look like 2026Q4.')
+  throw new HttpError(400, 'invalid_quarter_filter', 'Bộ lọc quý phải có dạng 2026Q4.')
 }
 
 // 'none' lists submissions that came without a source link.
 export function parseSourceFilter(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
   if (value === 'none' || uuidPattern.test(value)) return value
-  throw new HttpError(400, 'invalid_source_filter', 'sourceId filter must be a source id or none.')
+  throw new HttpError(400, 'invalid_source_filter', 'Bộ lọc nguồn mời phải là mã nguồn hoặc none.')
 }
 
 export function parseEmailStatus(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
   if (validEmailStatuses.has(value)) return 'failed' as const
-  throw new HttpError(400, 'invalid_email_status_filter', 'emailStatus filter must be failed.')
+  throw new HttpError(400, 'invalid_email_status_filter', 'Bộ lọc email chỉ nhận giá trị failed.')
 }
 
 function parseRoundtableLinkStatus(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
   if (validRoundtableLinkStatuses.has(value)) return value as 'linked' | 'standalone'
-  throw new HttpError(400, 'invalid_roundtable_link_filter', 'roundtable link filter must be linked or standalone.')
+  throw new HttpError(400, 'invalid_roundtable_link_filter', 'Bộ lọc liên kết chỉ nhận linked hoặc standalone.')
 }
 
 function assertUuid(id: string | undefined, code: string, message: string) {
@@ -138,9 +124,9 @@ function assertUuid(id: string | undefined, code: string, message: string) {
 }
 
 function reportStorageErrorToHttp(error: ReportAssetStorageError): HttpError {
-  if (error.status === 404) return new HttpError(404, 'report_pdf_missing', 'Report PDF file is missing from storage.')
-  if (error.retryable) return new HttpError(503, 'report_storage_unavailable', 'Report storage is temporarily unavailable.')
-  return new HttpError(500, 'report_storage_error', 'Report storage request failed.')
+  if (error.status === 404) return new HttpError(404, 'report_pdf_missing', 'Không tìm thấy file PDF báo cáo trong kho lưu trữ.')
+  if (error.retryable) return new HttpError(503, 'report_storage_unavailable', 'Kho lưu trữ báo cáo tạm thời không truy cập được. Vui lòng thử lại sau.')
+  return new HttpError(500, 'report_storage_error', 'Không đọc được file từ kho lưu trữ báo cáo.')
 }
 
 function reportRetryErrorToHttp(error: ReportRetryError): HttpError {
@@ -191,21 +177,6 @@ export function createAdminRouter(
     }
   })
 
-  router.get('/roundtable-registrations', async (req, res, next) => {
-    try {
-      const data = await repository.listRoundtableRegistrations({
-        ...parsePaginationCursor(req.query.cursor, req.query.before, req.query.beforeId, config.adminCursorSecret),
-        limit: parseLimit(req.query.limit),
-        linkStatus: parseRoundtableLinkStatus(req.query.linkStatus),
-        quarter: parseQuarter(req.query.quarter),
-        search: parseSearch(req.query.search),
-      })
-      res.json({ data })
-    } catch (error) {
-      next(error)
-    }
-  })
-
   router.get('/roundtable-registrations/:id', async (req, res, next) => {
     try {
       const id = assertUuid(req.params.id, 'invalid_roundtable_registration_id', 'Roundtable registration id must be a UUID.')
@@ -240,20 +211,6 @@ export function createAdminRouter(
     }
   })
 
-  router.get('/webinar-registrations', async (req, res, next) => {
-    try {
-      const data = await repository.listWebinarRegistrations({
-        ...parsePaginationCursor(req.query.cursor, req.query.before, req.query.beforeId, config.adminCursorSecret),
-        limit: parseLimit(req.query.limit),
-        linkStatus: parseRoundtableLinkStatus(req.query.linkStatus),
-        search: parseSearch(req.query.search),
-      })
-      res.json({ data })
-    } catch (error) {
-      next(error)
-    }
-  })
-
   router.get('/webinar-registrations/:id', async (req, res, next) => {
     try {
       const id = assertUuid(req.params.id, 'invalid_webinar_registration_id', 'Webinar registration id must be a UUID.')
@@ -278,7 +235,7 @@ export function createAdminRouter(
       if (!canManageContent(getRequiredAdminSession(req).user.role)) throw new HttpError(403, 'admin_required', 'Bạn không có quyền tải file báo cáo.')
       const id = assertUuid(req.params.id, 'invalid_report_job_id', 'Report job id must be a UUID.')
       const reportJob = await reportRepository.getReportJobDownload(id)
-      if (!reportJob) throw new HttpError(404, 'report_pdf_not_found', 'Report PDF is not available.')
+      if (!reportJob) throw new HttpError(404, 'report_pdf_not_found', 'Báo cáo PDF chưa có sẵn.')
       const asset = await reportAssetStorage.download(reportJob.pdfStoragePath)
       res.setHeader('Cache-Control', 'private, no-store')
       res.setHeader('Content-Disposition', contentDisposition(req.query.download))
@@ -327,62 +284,6 @@ export function createAdminRouter(
         surveyVersion: parseSurveyVersion(req.query.surveyVersion),
       })
       res.json({ data })
-    } catch (error) {
-      next(error)
-    }
-  })
-
-  router.get('/survey-submissions', async (req, res, next) => {
-    try {
-      const data = await repository.listSubmissions({
-        ...parsePaginationCursor(req.query.cursor, req.query.before, req.query.beforeId, config.adminCursorSecret),
-        emailStatus: parseEmailStatus(req.query.emailStatus),
-        limit: parseLimit(req.query.limit),
-        reportStatus: parseReportStatus(req.query.reportStatus),
-        reportPdfUploaded: parseReportPdfUploaded(req.query.reportPdfUploaded),
-        roundtableRegistered: parseRoundtable(req.query.roundtable),
-        search: parseSearch(req.query.search),
-        sourceId: parseSourceFilter(req.query.sourceId),
-        status: parseStatus(req.query.status),
-        surveyVersion: parseSurveyVersion(req.query.surveyVersion),
-      })
-      res.json({ data })
-    } catch (error) {
-      next(error)
-    }
-  })
-
-  router.get('/survey-submissions/full', async (req, res, next) => {
-    try {
-      const page = parsePage(req.query.page)
-      const limit = parseFullSubmissionLimit(req.query.limit)
-      const result = await repository.listSubmissionDetails({
-        emailStatus: parseEmailStatus(req.query.emailStatus),
-        limit,
-        page,
-        reportStatus: parseReportStatus(req.query.reportStatus),
-        reportPdfUploaded: parseReportPdfUploaded(req.query.reportPdfUploaded),
-        roundtableRegistered: parseRoundtable(req.query.roundtable),
-        search: parseSearch(req.query.search),
-        sourceId: parseSourceFilter(req.query.sourceId),
-        status: parseStatus(req.query.status),
-        surveyVersion: parseSurveyVersion(req.query.surveyVersion),
-      })
-      const totalPages = result.totalItems === 0 ? 0 : Math.ceil(result.totalItems / limit)
-      res.setHeader('X-API-Deprecated', 'Use /survey-submissions/page and /survey-submissions/:id instead.')
-      res.json({
-        data: {
-          items: result.items,
-          pagination: {
-            hasNextPage: page < totalPages,
-            hasPreviousPage: page > 1 && totalPages > 0,
-            limit,
-            page,
-            totalItems: result.totalItems,
-            totalPages,
-          },
-        },
-      })
     } catch (error) {
       next(error)
     }

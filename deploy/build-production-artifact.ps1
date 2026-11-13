@@ -5,7 +5,9 @@ param(
   [string]$ReleaseId = '',
   [string]$FrontendApiBaseUrl = '/api',
   [string]$LandingBaseUrl = 'https://ceo-workforce-index.com',
-  [switch]$SkipInstall
+  [switch]$SkipInstall,
+  # Emergency only: build without running typecheck, lint and tests. Recorded in release.json.
+  [switch]$SkipChecks
 )
 
 $ErrorActionPreference = 'Stop'
@@ -99,6 +101,21 @@ if (-not $SkipInstall) {
   Invoke-Npm $backendPath @('ci', '--no-audit', '--no-fund')
 }
 
+# Quality gate: nothing is built unless all three repositories pass their checks. The frontend
+# builds below also typecheck (tsc -b) before bundling.
+if ($SkipChecks) {
+  Write-Warning 'SkipChecks: typecheck, lint and tests were NOT run for this artifact.'
+} else {
+  Invoke-Npm $backendPath @('run', 'typecheck')
+  Invoke-Npm $backendPath @('run', 'lint')
+  Invoke-Npm $backendPath @('test')
+  Invoke-Npm $DashboardPath @('run', 'lint')
+  Invoke-Npm $DashboardPath @('test')
+  Invoke-Npm $Source4Path @('run', 'lint')
+  Invoke-Npm $Source4Path @('test')
+  Invoke-Npm $Source4Path @('run', 'check:i18n')
+}
+
 $previousSource4ApiUrl = [Environment]::GetEnvironmentVariable('VITE_CWI_API_BASE_URL', 'Process')
 $previousDashboardApiUrl = [Environment]::GetEnvironmentVariable('VITE_API_BASE_URL', 'Process')
 $previousDashboardLandingUrl = [Environment]::GetEnvironmentVariable('VITE_LANDING_BASE_URL', 'Process')
@@ -148,6 +165,7 @@ $marker = [ordered]@{
   artifactVersion = 1
   releaseId = $ReleaseId
   builtAt = [DateTime]::UtcNow.ToString('o')
+  checksSkipped = [bool]$SkipChecks
   repositories = [ordered]@{
     source4 = Get-GitSha $Source4Path
     cwiDashboard = Get-GitSha $DashboardPath

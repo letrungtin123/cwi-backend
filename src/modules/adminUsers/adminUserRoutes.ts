@@ -7,8 +7,8 @@ import type { AuditActor } from '../audit/adminAuditLog.js'
 import { ADMIN_ROLES, requireSuperadmin } from '../auth/adminRoles.js'
 import type { AuthService } from '../auth/authService.js'
 import type { AdminAccountCreate, AdminAccountUpdate, AdminUserService } from './adminUserService.js'
+import { uuidPattern } from '../../http/ids.js'
 
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const displayNameSchema = z.string().trim().min(1).max(160)
 const roleSchema = z.enum(ADMIN_ROLES)
@@ -46,7 +46,7 @@ export function normalizeAdminAccountUpdate(payload: unknown): AdminAccountUpdat
 
 function accountId(req: Request) {
   const id = req.params.id
-  if (typeof id !== 'string' || !uuidPattern.test(id)) throw new HttpError(400, 'invalid_admin_user_id', 'Admin user id must be a UUID.')
+  if (typeof id !== 'string' || !uuidPattern.test(id)) throw new HttpError(400, 'invalid_admin_user_id', 'Mã tài khoản quản trị phải là UUID hợp lệ.')
   return id
 }
 

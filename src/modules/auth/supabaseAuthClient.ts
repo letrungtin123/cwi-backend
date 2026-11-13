@@ -15,7 +15,7 @@ export type SupabasePasswordUser = {
 
 function getAuthConfig(config: AuthConfig) {
   if (!config.supabaseAuthUrl || !config.supabaseAnonKey) {
-    throw new HttpError(503, 'auth_provider_not_configured', 'Authentication provider is not configured.')
+    throw new HttpError(503, 'auth_provider_not_configured', 'Dịch vụ đăng nhập chưa được cấu hình.')
   }
 
   return {
@@ -41,11 +41,11 @@ export async function signInWithSupabasePassword(
   })
 
   if (response.status === 400 || response.status === 401) {
-    throw new HttpError(401, 'invalid_credentials', 'Email or password is incorrect.')
+    throw new HttpError(401, 'invalid_credentials', 'Email hoặc mật khẩu không đúng.')
   }
 
   if (!response.ok) {
-    throw new HttpError(502, 'auth_provider_error', 'Authentication provider rejected the request.')
+    throw new HttpError(502, 'auth_provider_error', 'Dịch vụ đăng nhập từ chối yêu cầu. Vui lòng thử lại sau.')
   }
 
   const data = (await response.json()) as SupabasePasswordResponse
@@ -53,7 +53,7 @@ export async function signInWithSupabasePassword(
   const userEmail = data.user?.email
 
   if (!userId || !userEmail) {
-    throw new HttpError(502, 'auth_provider_invalid_response', 'Authentication provider returned an invalid response.')
+    throw new HttpError(502, 'auth_provider_invalid_response', 'Dịch vụ đăng nhập trả về dữ liệu không hợp lệ. Vui lòng thử lại sau.')
   }
 
   return {

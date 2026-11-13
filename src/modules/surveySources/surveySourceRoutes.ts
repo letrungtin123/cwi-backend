@@ -8,8 +8,8 @@ import type { AuthService } from '../auth/authService.js'
 import { SURVEY_SOURCE_CODE_PATTERN } from './surveySourceCode.js'
 import type { PgSurveySourceRepository, SurveySourceCreate, SurveySourceUpdate } from './surveySourceRepository.js'
 import { canManageContent } from '../auth/adminRoles.js'
+import { uuidPattern } from '../../http/ids.js'
 
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const nameSchema = z.string().trim().min(1).max(120)
 const noteSchema = z
@@ -59,12 +59,12 @@ export function normalizeSurveySourceUpdate(payload: unknown): SurveySourceUpdat
 function parseSurveyVersion(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
   if (/^[0-9]{4}Q[1-4]$/.test(value)) return value
-  throw new HttpError(400, 'invalid_survey_version_filter', 'surveyVersion filter must look like 2026Q4.')
+  throw new HttpError(400, 'invalid_survey_version_filter', 'Bộ lọc bộ câu hỏi phải có dạng 2026Q4.')
 }
 
 function sourceId(req: Request) {
   const id = req.params.id
-  if (typeof id !== 'string' || !uuidPattern.test(id)) throw new HttpError(400, 'invalid_survey_source_id', 'Survey source id must be a UUID.')
+  if (typeof id !== 'string' || !uuidPattern.test(id)) throw new HttpError(400, 'invalid_survey_source_id', 'Mã nguồn mời phải là UUID hợp lệ.')
   return id
 }
 

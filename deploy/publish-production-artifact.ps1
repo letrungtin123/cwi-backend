@@ -8,6 +8,8 @@ param(
   [string]$FrontendApiBaseUrl = '/api',
   [string]$LandingBaseUrl = 'https://ceo-workforce-index.com',
   [switch]$SkipInstall,
+  # Emergency only: skip typecheck, lint and tests (see build-production-artifact.ps1).
+  [switch]$SkipChecks,
   [switch]$PruneLegacySource
 )
 
@@ -30,6 +32,7 @@ if ($DashboardPath) { $buildArgs += @('-DashboardPath', $DashboardPath) }
 if ($FrontendApiBaseUrl) { $buildArgs += @('-FrontendApiBaseUrl', $FrontendApiBaseUrl) }
 if ($LandingBaseUrl) { $buildArgs += @('-LandingBaseUrl', $LandingBaseUrl) }
 if ($SkipInstall) { $buildArgs += '-SkipInstall' }
+if ($SkipChecks) { $buildArgs += '-SkipChecks' }
 $buildOutput = @(& pwsh @buildArgs)
 $builderExitCode = $LASTEXITCODE
 if ($builderExitCode -ne 0) { throw "Local production artifact build failed with exit code $builderExitCode" }
