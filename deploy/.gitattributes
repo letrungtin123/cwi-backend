@@ -1,0 +1,6 @@
+# Files copied to the Linux server must keep LF line endings on every checkout.
+*.sh text eol=lf
+*.service text eol=lf
+*.timer text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
