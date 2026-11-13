@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { HttpError } from '../../http/errors.js'
+import { normalizePhoneNumber } from '../shared/phone.js'
 
 const idempotencyKeySchema = z.string().trim().min(8).max(128).regex(/^[A-Za-z0-9._:-]+$/)
-const phonePattern = /^(?:0\d{9,10}|\+[1-9]\d{7,14})$/
 
 export type QuarterlyReportUploadInput = {
   activate: boolean
@@ -51,9 +51,8 @@ function normalizeText(value: string) {
 }
 
 function normalizePhone(value: string) {
-  const compact = value.replace(/[\s().-]/g, '')
-  if (/^0\d{9,10}$/.test(compact)) return `+84${compact.slice(1)}`
-  if (phonePattern.test(compact)) return compact
+  const normalized = normalizePhoneNumber(value)
+  if (normalized) return normalized
   invalid('invalid_quarterly_report_phone', 'Số điện thoại không hợp lệ.')
 }
 

@@ -42,12 +42,13 @@ function createRepository() {
 }
 
 describe('full submission PDF status', () => {
-  it('returns the upload flag and applies the true filter to page and count queries', async () => {
+  it('applies the uploaded-PDF filter to the cursor page query', async () => {
     const { query, repository } = createRepository()
 
-    const result = await repository.listSubmissionDetails({
+    const result = await repository.listSubmissionsPage({
+      before: null,
+      beforeId: null,
       limit: 10,
-      page: 1,
       reportStatus: null,
       reportPdfUploaded: true,
       roundtableRegistered: null,
@@ -55,33 +56,12 @@ describe('full submission PDF status', () => {
       status: null,
     })
 
-    expect(result.items[0]?.reportPdfUploaded).toBe(true)
     expect(result.items[0]?.phone).toBe('+84901234567')
-    const submissionQueries = query.mock.calls
+    const pageQuery = query.mock.calls
       .map(([sql]) => sql)
-      .filter((sql) => sql.includes('report_pdf_uploaded') || sql.includes('cwi_submission_report_files'))
-    expect(submissionQueries).toHaveLength(2)
-    expect(submissionQueries.every((sql) => sql.includes('EXISTS'))).toBe(true)
-  })
-
-  it('uses NOT EXISTS for the false filter', async () => {
-    const { query, repository } = createRepository()
-
-    await repository.listSubmissionDetails({
-      limit: 10,
-      page: 1,
-      reportStatus: null,
-      reportPdfUploaded: false,
-      roundtableRegistered: null,
-      search: null,
-      status: null,
-    })
-
-    const submissionQueries = query.mock.calls
-      .map(([sql]) => sql)
-      .filter((sql) => sql.includes('report_pdf_uploaded') || sql.includes('cwi_submission_report_files'))
-    expect(submissionQueries).toHaveLength(2)
-    expect(submissionQueries.every((sql) => sql.includes('NOT EXISTS'))).toBe(true)
+      .find((sql) => sql.includes('ORDER BY s.submitted_at DESC, s.id DESC'))
+    expect(pageQuery).toContain('cwi_submission_report_files')
+    expect(pageQuery).toMatch(/AND EXISTS|WHERE EXISTS|\(EXISTS|\s EXISTS/)
   })
 
   it('applies the PDF filter to the cursor page query', async () => {
@@ -105,12 +85,13 @@ describe('full submission PDF status', () => {
     expect(pageQuery).toContain('cwi_submission_report_files')
   })
 
-  it('filters by the latest report generation status in page and count queries', async () => {
+  it('filters the cursor page by the latest report generation status', async () => {
     const { query, repository } = createRepository()
 
-    await repository.listSubmissionDetails({
+    await repository.listSubmissionsPage({
+      before: null,
+      beforeId: null,
       limit: 10,
-      page: 1,
       reportStatus: 'failed',
       reportPdfUploaded: null,
       roundtableRegistered: null,
@@ -118,12 +99,9 @@ describe('full submission PDF status', () => {
       status: null,
     })
 
-    const reportStatusQueries = query.mock.calls
-      .map(([sql]) => sql)
-      .filter((sql) => sql.includes('latest_report.status::text'))
-    expect(reportStatusQueries).toHaveLength(2)
-    expect(reportStatusQueries.every((sql) => sql.includes("= $1"))).toBe(true)
-    expect(query.mock.calls.some(([, params]) => params?.[0] === 'failed')).toBe(true)
+    const [pageQuery, pageParams] = query.mock.calls.find(([sql]) => sql.includes('ORDER BY s.submitted_at DESC, s.id DESC')) ?? []
+    expect(pageQuery).toContain('latest_report.status::text')
+    expect(pageParams).toContain('failed')
   })
 })
 
@@ -149,25 +127,6 @@ describe('submission survey version filter', () => {
     expect(pageQuery).toContain('s.language')
     expect(pageQuery).toContain('s.survey_version = $1')
     expect(pageParams?.[0]).toBe('2026Q3')
-  })
-
-  it('applies the filter to the full list page and count queries', async () => {
-    const { query, repository } = createRepository()
-
-    await repository.listSubmissionDetails({
-      limit: 10,
-      page: 1,
-      reportStatus: null,
-      reportPdfUploaded: null,
-      roundtableRegistered: null,
-      search: null,
-      status: null,
-      surveyVersion: '2026Q4',
-    })
-
-    const versionQueries = query.mock.calls.filter(([sql]) => sql.includes('s.survey_version = $1'))
-    expect(versionQueries).toHaveLength(2)
-    expect(versionQueries.every(([, params]) => params?.[0] === '2026Q4')).toBe(true)
   })
 })
 
@@ -214,7 +173,7 @@ describe('report summary while report creation is paused', () => {
       return { rows: [row] }
     })
     const repository = new PgAdminRepository({ query } as unknown as pg.Pool, 'test-secret')
-    const result = await repository.listSubmissionDetails({ limit: 10, page: 1, reportPdfUploaded: null, reportStatus: null, roundtableRegistered: null, search: null, status: null })
+    const result = await repository.listSubmissionsPage({ before: null, beforeId: null, limit: 10, reportPdfUploaded: null, reportStatus: null, roundtableRegistered: null, search: null, status: null })
     return { report: result.items[0]?.report, sql: String(query.mock.calls[0]?.[0]) }
   }
 

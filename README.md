@@ -1,152 +1,203 @@
 # CWI Backend
 
-Express + TypeScript backend for receiving CEO Workforce Index survey submissions and serving the admin dashboard.
+Backend của CEO Workforce Index (CWI), viết bằng Node.js 24, TypeScript và Express 5. Backend lo các việc sau:
 
-## Local Setup
+- nhận bài khảo sát, đăng ký CEO Roundtable và Webinar từ trang công khai;
+- phát hành báo cáo quý và ghi nhận lượt tải;
+- cung cấp API cho trang quản trị (dashboard);
+- điều phối việc tạo báo cáo cá nhân và gửi email kèm PDF.
+
+Cùng repo này có bộ công cụ đóng gói và triển khai cho cả ba ứng dụng: `source4` (trang công khai), `cwi-dashboard` (trang quản trị) và backend.
+
+## Thành phần khi chạy
+
+| Tiến trình (PM2) | File | Việc làm |
+| --- | --- | --- |
+| `cwi-backend` | `src/server.ts` | API HTTP, cổng 8088 (chỉ nghe nội bộ) |
+| `cwi-public` | `deploy/cwi-public-router.mjs` | Phục vụ trang công khai, `/dashboard/` và chuyển tiếp `/api` về backend, cổng 8180 |
+| `cwi-report-generation-worker` | `src/reportGenerationWorker.ts` | Gọi dịch vụ AI tạo báo cáo, render PDF, lưu vào Storage |
+| `cwi-report-delivery-worker` | `src/reportDeliveryWorker.ts` | Gửi email kèm PDF qua SMTP, nhận việc từ RabbitMQ |
+| `cwi-export-worker` | `src/exportWorker.ts` | Xuất dữ liệu Excel cho trang quản trị |
+
+Dịch vụ phụ thuộc:
+
+- PostgreSQL và Storage của dự án Supabase CWI.
+- RabbitMQ, khi bật gửi email.
+- Chrome hoặc Edge, để render PDF.
+- Dịch vụ AI tạo báo cáo (cwi-ai). Dịch vụ này chạy riêng và không nằm trong repo này.
+
+## Chạy ở máy phát triển
 
 ```powershell
-Set-Location D:\CWI\cwi-backend
 npm install
-Copy-Item .env.example .env
-npm run dev
+Copy-Item .env.example .env   # rồi điền DATABASE_URL, các secret...
+npm run dev                   # API ở HOST/PORT trong .env (dashboard mặc định gọi 127.0.0.1:8080)
 ```
 
-Required production secrets/config live in `.env`; do not put real secrets in source control.
+Các worker chạy riêng khi cần:
 
-## Endpoints
+```powershell
+npm run dev:report-generation-worker
+npm run dev:report-delivery-worker
+npm run dev:export-worker
+```
 
-Health:
-- `GET /health` - backwards-compatible liveness endpoint.
-- `GET /healthz` - liveness endpoint.
-- `GET /readyz` - read-only PostgreSQL readiness check.
+> [!WARNING]
+> Worker tạo báo cáo gửi **mọi** bài khảo sát đang chờ trong database tới dịch vụ AI mà `REPORT_SERVICE_BASE_URL` trỏ tới. Ở máy phát triển, giữ `REPORT_SERVICE_ENABLED=false`, trừ khi chủ động thử luồng này và đã biết dữ liệu nào sẽ được gửi đi.
 
-Public:
-- `POST /api/v1/survey-submissions`
-- `POST /api/v1/roundtable-registrations`
-- `POST /api/v1/webinar-registrations`
-- `GET /api/v1/public/quarterly-reports/active`
-- `GET /api/v1/public/quarterly-reports/:slug`
-- `GET /api/v1/public/quarterly-reports/:slug/pdf` (backend stream từ private Storage; hỗ trợ HTTP Range cho PDF.js)
-- `POST /api/v1/public/quarterly-reports/:slug/downloads` (ghi nhận lead đã consent, trả link tải có chữ ký ngắn hạn)
-- `GET /api/v1/public/quarterly-reports/:slug/download?token=...` (chỉ dùng từ link có chữ ký)
-- `GET /api/v1/public/report-jobs/:id/status` (requires the per-report `X-CWI-Report-Token` header)
-- `GET /api/v1/public/report-jobs/:id/html` (requires the per-report `X-CWI-Report-Token` header)
+Trang công khai (`source4`, cổng 5670) và trang quản trị (`cwi-dashboard`) chạy bằng `npm run dev` trong repo của từng trang. Biến `VITE_*` trong `.env` của mỗi trang trỏ về API local.
 
-Admin auth:
-- `POST /api/v1/auth/login`
-- `GET /api/v1/auth/me`
-- `POST /api/v1/auth/logout`
+## Kiểm tra
 
-Admin dashboard API:
-- `GET /api/v1/admin/survey-submissions/page`
-- `GET /api/v1/admin/survey-submissions/stats`
-- `GET /api/v1/admin/survey-submissions/:id`
-- `GET /api/v1/admin/roundtable-registrations/page`
-- `GET /api/v1/admin/roundtable-registrations/stats`
-- `GET /api/v1/admin/roundtable-registrations/:id`
-- `GET /api/v1/admin/webinar-registrations/page`
-- `GET /api/v1/admin/webinar-registrations/stats`
-- `GET /api/v1/admin/webinar-registrations/:id`
-- `GET /api/v1/admin/report-jobs/:id/pdf`
-- `GET /api/v1/admin/quarterly-reports/reports`
-- `POST /api/v1/admin/quarterly-reports/reports` (admin only, multipart PDF only)
-- `GET /api/v1/admin/quarterly-reports/downloads/page`
-- `GET /api/v1/admin/quarterly-reports/downloads/stats`
+```powershell
+npm run typecheck   # TypeScript cho src và tests
+npm run lint        # oxlint
+npm test            # vitest (không cần database)
+npm run test:db     # chạy SQL thật trên PostgreSQL local; mọi dữ liệu ghi đều bị rollback
+```
 
-Admin list endpoints default to `limit=10` and accept a signed opaque `cursor`. The legacy `before`/`beforeId` pair remains supported during client migration. `limit` must be an integer from 1 to 100; invalid values return `400`.
+`test:db` đọc `DATABASE_URL` trong `.env`. Lệnh từ chối chạy nếu địa chỉ không phải localhost, và tự bỏ qua (báo "skipped") khi database local chưa bật. Các repository vẫn tự mở transaction của chúng; trong lúc test, các transaction đó được đổi thành savepoint nằm trong một transaction lớn, và transaction lớn luôn bị rollback khi xong.
 
-`GET /api/v1/admin/survey-submissions/full` remains available for compatibility but is deprecated. Its `limit` defaults to 10 and is hard-capped at 10 because each item includes the full answer array. Values above 10 return `400` before any database query. Use the paginated list endpoint and fetch one detail record by ID instead of loading answer arrays for many users in one request.
+Script đóng gói production chạy toàn bộ các kiểm tra này trên cả ba repo trước khi build (xem phần Triển khai).
 
-The submission list/detail response does not expose internal score columns, source, domain scores, or client metadata. PDF responses are authenticated streams from private storage and never expose absolute storage URLs.
-
-Dashboard login uses Supabase Auth password verification on the backend, then stores an internal admin session in `cwi_admin_sessions`. The browser receives an HttpOnly session cookie and a CSRF cookie/header pair. Admin endpoints do not expose database credentials, service-role keys, or API keys to the frontend.
-
-## Quarterly Reports
-
-Apply `D:\CWI\supabase-cwi\supabase\manual_sql\20260928_0000_add_quarterly_reports.sql` manually in the intended Supabase project before enabling this module. The SQL creates the private `cwi-quarterly-report-pdfs` bucket and the report/download tables; the application and deployment scripts never run it automatically.
-
-After confirming that SQL, add these server-only values to the production environment file and restart the backend:
+## Cấu trúc mã nguồn
 
 ```text
-QUARTERLY_REPORTS_ENABLED=true
-QUARTERLY_REPORT_BUCKET=cwi-quarterly-report-pdfs
-QUARTERLY_REPORT_DOWNLOAD_TOKEN_SECRET=<at-least-32-random-characters>
-QUARTERLY_REPORT_DOWNLOAD_TOKEN_TTL_SECONDS=600
-QUARTERLY_REPORT_UPLOAD_MAX_BYTES=52428800
+src/
+  server.ts, app.ts         Khởi động HTTP, middleware, gắn các router
+  *Worker.ts                Điểm vào của từng worker
+  config/env.ts             Đọc và kiểm tra biến môi trường (zod), sai cấu hình thì dừng ngay
+  db/                       Pool PostgreSQL
+  http/                     Lỗi HTTP, phiên quản trị, cursor phân trang, kiểm tra id
+  modules/
+    survey/                 Nhận bài khảo sát, bộ câu hỏi VI/EN, chấm điểm
+    roundtable/, webinar/   Đăng ký sự kiện
+    quarterlyReports/       Báo cáo quý công khai và lượt tải
+    reports/                Tạo báo cáo qua dịch vụ AI, render PDF, link xem báo cáo
+    reportDelivery/         File PDF gửi người tham gia, chiến dịch email, SMTP
+    exports/                Xuất Excel
+    admin/                  Danh sách và chi tiết cho dashboard
+    adminUsers/, auth/      Tài khoản quản trị, đăng nhập, phân quyền
+    surveySources/          "Nguồn mời": link/QR theo đối tác, đếm lượt gửi
+    submissionDeletion/     Xoá lượt gửi chưa có báo cáo
+    audit/                  Lịch sử thao tác quản trị
+    shared/                 Hàm dùng chung (chuẩn hoá số điện thoại...)
+tests/                      vitest
+deploy/                     Đóng gói, cài đặt, PM2, nginx, public router
 ```
 
-The public landing route is `/bao-cao-quy` for the active report and `/bao-cao-quy/q3-2026` for a stable campaign URL. Both paths are SPA-fallback routes in the public router, so reloading them stays on the report page. The PDF itself is viewable through the backend because it is public content; the gated download flow prevents direct Storage access and records a consented lead before issuing an attachment link.
+## API
 
-## Admin Bootstrap
+Mọi phản hồi thành công có dạng `{ "data": ... }`. Phản hồi lỗi có dạng `{ "error": { "code", "message", "requestId" } }`:
 
-1. Run the manual survey schema SQL if it has not been run yet.
-2. Run `D:\CWI\supabase-cwi\supabase\manual_sql\20260820_0000_create_cwi_admin_auth.sql` manually in Supabase Studio.
-3. Create a dashboard user in Supabase Studio > Authentication > Users.
-4. Insert that `auth.users.id` into `public.cwi_admin_users` using the bootstrap SQL comment in the manual SQL file.
+- `code` là mã tiếng Anh, cố định; frontend rẽ nhánh theo mã này.
+- `message` là câu tiếng Việt để hiển thị cho người dùng.
 
-## Submission Status
+### Kiểm tra sống
 
-- `part1_only`: user completed Part 1 and submitted Part 1 report.
-- `part2_refused_privacy`: user completed Part 1 + Part 2, selected "Không đồng ý" privacy consent, and requested Part 1 report. Full Part 2 answers are still stored.
-- `full_private_report`: user completed Part 1 + Part 2, selected "Đồng ý" privacy consent, and submitted the full report request.
+| Method | Path | Ghi chú |
+| --- | --- | --- |
+| GET | `/healthz`, `/health` | Tiến trình còn sống |
+| GET | `/readyz` | Kết nối được PostgreSQL |
 
-Every stored submission has a non-empty `status_note`. If the client does not provide one, the backend writes the canonical note for the selected status.
+### Công khai (`/api/v1`)
 
-## Public Submit Payload
+| Method | Path | Ghi chú |
+| --- | --- | --- |
+| POST | `/survey-submissions` | Nộp bài khảo sát (kèm mã chống gửi trùng) |
+| POST | `/roundtable-registrations`, `/roundtable-registrations/check` | Đăng ký CEO Roundtable, kiểm tra email đã đăng ký |
+| GET | `/roundtable-registrations/event` | Thời gian, địa điểm Roundtable của quý |
+| POST | `/webinar-registrations`, `/webinar-registrations/check` | Đăng ký Webinar |
+| GET | `/public/report-jobs/:id/status`, `/public/report-jobs/:id/html` | Trạng thái và nội dung báo cáo cá nhân; cần header `X-CWI-Report-Token` |
+| GET | `/public/quarterly-reports/active`, `/public/quarterly-reports/:slug` | Thông tin báo cáo quý |
+| GET | `/public/quarterly-reports/:slug/pdf` | Xem PDF; hỗ trợ HTTP Range |
+| POST | `/public/quarterly-reports/:slug/downloads` | Ghi nhận người tải đã đồng ý điều khoản, trả link tải có chữ ký |
+| GET | `/public/quarterly-reports/:slug/download?token=` | Tải file theo link có chữ ký |
 
-```json
-{
-  "submissionStatus": "part1_only",
-  "participant": {
-    "fullName": "Nguyen Van An",
-    "email": "an@company.com",
-    "position": "HRM"
-  },
-  "privacyConsent": "not_applicable",
-  "answers": [
-    { "idx": 1, "answer": 4 }
-  ],
-  "roundtableRegistration": {
-    "registered": true,
-    "fullName": "Nguyen Van An",
-    "email": "an@company.com"
-  }
-}
-```
+### Đăng nhập (`/api/v1/auth`)
 
-The backend stores canonical question text from `src/modules/survey/surveyQuestions.ts`; client-provided question text is ignored.
+`POST /login`, `GET /me`, `POST /logout`, `POST /change-password`.
 
-## Production Deployment
+Đăng nhập kiểm tra mật khẩu qua Supabase Auth, sau đó tạo phiên riêng trong `cwi_admin_sessions`. Trình duyệt nhận cookie phiên HttpOnly cùng cặp cookie/header CSRF. Mọi request thay đổi dữ liệu phải gửi header `x-csrf-token`.
 
-Production chạy bằng artifact đã build và kiểm tra từ máy local hoặc CI; máy chủ không cần giữ Git repository hay raw source của ba ứng dụng. Xem `DEPLOYMENT_ARTIFACT.md` và `deploy/README.md` để tạo, gửi, kiểm tra, rollback và dọn release.
+### Quản trị (`/api/v1/admin`)
 
-`deploy/build-production-artifact.ps1` chỉ đóng gói `dist`, runtime launcher, production dependencies metadata và checksum. `deploy/install-production-artifact.sh` cài release mới qua staging health check trước khi thay PM2. Secrets nằm ngoài release qua `CWI_ENV_FILE`; quy trình không chạy SQL migration và không tác động dữ liệu Supabase.
+| Nhóm | Endpoint |
+| --- | --- |
+| Bài khảo sát | `GET /survey-submissions/page`, `/stats`, `/:id`; `POST /survey-submissions/:id/retry-report`; `GET /report-jobs/:id/pdf` |
+| Roundtable, Webinar | `GET /roundtable-registrations/page`, `/stats`, `/:id` (tương tự cho `/webinar-registrations`); `GET`/`PUT /roundtable-event` |
+| File PDF và email | `/report-delivery/submissions/status`, `/report-delivery/submissions/:id/report-pdf` (PUT tải lên, GET tải về), `/report-delivery/submissions/:id/retry-email`, `/report-delivery/campaigns/*` |
+| Tạo báo cáo | `GET`/`PUT /report-generation-settings` (công tắc tạm dừng gọi AI) |
+| Báo cáo quý | `GET`/`POST /quarterly-reports/reports`, `GET /quarterly-reports/downloads/page`, `/downloads/stats` |
+| Nguồn mời | `/survey-sources` (CRUD), `/survey-sources/:id/history` |
+| Xuất Excel | `POST /exports`, `GET /exports/:id`, `GET /exports/:id/download` |
+| Xoá lượt gửi | `POST /submission-deletions/preview`, `POST /submission-deletions` |
+| Tài khoản | `/admin-users` (tạo, sửa, khoá/mở khoá, đặt lại mật khẩu) |
 
-## V3 Report Pipeline
+Danh sách dùng phân trang theo con trỏ:
 
-The asynchronous report pipeline is opt-in. Before enabling it in an environment, apply
-`D:\CWI\supabase-cwi\supabase\manual_sql\20260903_0000_add_v3_report_email_bridge.sql` manually in the matching Supabase project. The application does not apply this SQL during startup or deployment.
+- Mặc định `limit=10`, tối đa 100.
+- Trang sau lấy bằng `cursor` có chữ ký mà server trả về.
 
-Set these server-side flags only after the SQL and the CWI AI service are ready:
+Phân quyền:
 
-- `REPORT_SERVICE_ENABLED=true` enables the dedicated report-generation worker.
-- `REPORT_SERVICE_BASE_URL` points to the internal CWI AI service; the worker calls only the registered V3 paths.
-- `REPORT_DELIVERY_ENABLED=true` enables the RabbitMQ/SMTP delivery worker.
-- `REPORT_AUTO_EMAIL_ENABLED=true` queues one automatic email after a report PDF is stored successfully.
-- `REPORT_STORAGE_BUCKET` is the private bucket for generated HTML/PDF assets.
+| Quyền | Được làm gì |
+| --- | --- |
+| `viewer` | Chỉ xem danh sách và trạng thái. Không tải PDF, không xuất Excel. |
+| `admin` | Mọi thao tác nội dung. |
+| `superadmin` | Như `admin`, cộng quản lý tài khoản quản trị và xoá lượt gửi. |
 
-Routing follows the survey state: `part1_only` and `part2_refused_privacy` use `POST /v3/reports/anonymous`; `full_private_report` uses `POST /v3/reports/personalized`. The worker polls `GET /v3/report-jobs/{job_id}`, fetches the completed HTML from `GET /v3/reports/{report_id}`, validates and renders it with the configured Chromium/Chrome/Edge executable, uploads HTML and PDF to private Supabase Storage, then creates the email job in the same database transaction as the completed report state. The email worker sends through SMTP with bounded concurrency, leases, retry backoff, and delivery-ambiguous protection.
+Các thao tác với tài khoản quản trị, nguồn mời và việc xoá lượt gửi được ghi vào lịch sử thao tác (audit).
 
-When report generation is enabled, the survey response also contains a short-lived, HMAC-signed access token scoped to that report job. The frontend polls the public status endpoint and fetches the HTML once `htmlAvailable=true`; it renders the returned document in a sandboxed iframe. HTML is published before PDF rendering, while the generation worker keeps its database lease until PDF and email-job creation complete, so another worker cannot process the same job concurrently. The public endpoints return no participant data, Storage URL, error detail, or report payload metadata.
+### Giới hạn upload
 
-The PM2 process `cwi-report-generation-worker` handles AI/PDF work separately from `cwi-report-delivery-worker`. Keep report generation at one process on a small server; scale only after measuring CWI AI, browser, database, storage, and SMTP capacity. A failed email is exposed through the admin `emailStatus=failed` filter and can be retried per submission. Automatic reports are never replaced by a manual upload after an email has been sent.
+Server nhận file tối đa 20 MB, vì nginx đặt `client_max_body_size 20m`. Backend cho phép tới 50 MB (`REPORT_UPLOAD_MAX_BYTES`, `QUARTERLY_REPORT_UPLOAD_MAX_BYTES`), nên giới hạn của nginx là giới hạn thực tế. Dashboard chặn file lớn hơn 20 MB trước khi gửi. Muốn nâng giới hạn thì phải đổi cả hai nơi.
 
-## Supabase
+## Trạng thái bài khảo sát
 
-Manual SQL is in:
+- `part1_only`: hoàn thành Phần 1, nhận báo cáo Phần 1.
+- `part2_refused_privacy`: làm cả hai phần nhưng không đồng ý điều khoản bảo mật. Câu trả lời Phần 2 vẫn được lưu; báo cáo chỉ gồm Phần 1.
+- `full_private_report`: làm cả hai phần và đồng ý điều khoản, nhận báo cáo đầy đủ.
 
-```text
-D:\CWI\supabase-cwi\supabase\manual_sql
-```
+Backend lưu nội dung câu hỏi chuẩn từ `src/modules/survey/surveyQuestions.ts` và bỏ qua nội dung câu hỏi do client gửi lên. Bài làm bằng tiếng Anh được quy đổi về câu trả lời tiếng Việt trước khi lưu. Bài gửi kèm bộ câu hỏi đã cũ bị từ chối với mã `survey_version_mismatch`.
 
-Review and execute migrations manually from the CWI Supabase project only.
+## Luồng tạo và gửi báo cáo
+
+1. Bài khảo sát được lưu, đồng thời tạo một việc tạo báo cáo.
+2. Worker tạo báo cáo gọi dịch vụ AI và chờ kết quả HTML:
+   - `part1_only` và `part2_refused_privacy` dùng `/v3/reports/anonymous`;
+   - `full_private_report` dùng `/v3/reports/personalized`.
+3. Worker render HTML thành PDF bằng Chrome/Edge, rồi lưu cả HTML và PDF vào Storage riêng tư.
+4. Khi bật `REPORT_AUTO_EMAIL_ENABLED`, việc gửi email được tạo trong cùng transaction với trạng thái "đã tạo xong".
+5. Worker gửi email gửi qua SMTP. Worker này có giới hạn số email gửi song song, cơ chế giữ việc (lease), thử lại có giãn cách, và không gửi lại khi không chắc email trước đã đi hay chưa.
+
+Trang khảo sát nhận một token ngắn hạn có chữ ký, chỉ dùng được cho đúng báo cáo đó, để theo dõi trạng thái và hiển thị HTML trong iframe sandbox.
+
+Admin có thể tạm dừng việc gọi AI bằng công tắc trong dashboard. Khi tạm dừng, bài mới vẫn được lưu, và người tham gia được báo sẽ nhận báo cáo qua email sau.
+
+Trên server nhỏ chỉ chạy một tiến trình tạo báo cáo.
+
+## Dữ liệu và SQL
+
+- SQL thay đổi cấu trúc nằm trong repo `supabase-cwi`, thư mục `supabase/manual_sql`.
+- Mỗi file được chạy **thủ công** trên đúng dự án Supabase CWI, sau khi đã sao lưu.
+- Ứng dụng và script triển khai không bao giờ tự chạy migration.
+
+Tạo tài khoản quản trị đầu tiên:
+
+1. Tạo user trong Supabase Studio > Authentication > Users.
+2. Thêm `auth.users.id` của user đó vào `public.cwi_admin_users` với quyền `superadmin`, theo hướng dẫn trong file SQL `create_cwi_admin_auth`.
+
+Các tài khoản sau đó được tạo ngay trong dashboard.
+
+## Triển khai
+
+Production chạy bản build đóng gói sẵn, không chạy từ mã nguồn, và PM2 quản lý các tiến trình. Xem `DEPLOYMENT_ARTIFACT.md` và `deploy/README.md`.
+
+Tóm tắt:
+
+- `deploy/build-production-artifact.ps1` chạy typecheck, lint và test của ba repo, rồi build và đóng gói.
+  - `-SkipChecks` bỏ qua bước kiểm tra. Chỉ dùng khi khẩn cấp.
+- `deploy/install-production-artifact.sh` chạy thử bản mới trên cổng staging, rồi mới chuyển PM2 sang. Nếu kiểm tra hỏng, bản cũ được giữ nguyên.
+- Secret nằm ngoài bản release, trong file do `CWI_ENV_FILE` chỉ tới.
+- Quy trình triển khai không chạy SQL và không xoá dữ liệu.

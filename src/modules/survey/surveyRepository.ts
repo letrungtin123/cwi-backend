@@ -201,7 +201,7 @@ export class PgSurveyRepository implements SurveyRepository {
 
       const submission = inserted.rows[0]
       if (!submission) {
-        throw new HttpError(500, 'submission_insert_failed', 'Failed to create survey submission.')
+        throw new HttpError(500, 'submission_insert_failed', 'Không lưu được bài khảo sát.')
       }
 
       const answerInsert = buildAnswerInsert(input.answers, submission.id)
@@ -228,10 +228,10 @@ export class PgSurveyRepository implements SurveyRepository {
 
       if (input.roundtableRegistration?.id) {
         if (!explicitRoundtable || explicitRoundtable.email.trim().toLowerCase() !== input.participant.email) {
-          throw new HttpError(409, 'roundtable_survey_email_mismatch', 'Roundtable registration must match the survey email.')
+          throw new HttpError(409, 'roundtable_survey_email_mismatch', 'Đăng ký CEO Roundtable phải dùng cùng email với bài khảo sát.')
         }
         if (explicitRoundtable.quarter !== input.surveyVersion) {
-          throw new HttpError(409, 'roundtable_quarter_mismatch', 'Roundtable registration belongs to another quarter.')
+          throw new HttpError(409, 'roundtable_quarter_mismatch', 'Đăng ký CEO Roundtable này thuộc quý khác.')
         }
       }
 

@@ -6,6 +6,7 @@ import { getRequestMeta } from './requestMeta.js'
 import type { AuthService } from '../modules/auth/authService.js'
 import type { AdminSession } from '../modules/auth/authTypes.js'
 import { getCookie } from '../modules/auth/cookies.js'
+import { canManageContent } from '../modules/auth/adminRoles.js'
 
 declare global {
   namespace Express {
@@ -47,9 +48,17 @@ export function createAdminRequestRateLimit(config: RuntimeConfig) {
   })
 }
 
+// The signed-in admin may change content (admin or super admin, not viewer). A route can pass its
+// own error to keep a more specific message.
+export function requireContentManager(req: Request, error?: HttpError) {
+  const session = getRequiredAdminSession(req)
+  if (!canManageContent(session.user.role)) throw error ?? new HttpError(403, 'admin_required', 'Bạn không có quyền thực hiện thao tác này.')
+  return session
+}
+
 export function getRequiredAdminSession(req: Request) {
   if (!req.adminSession) {
-    throw new HttpError(500, 'admin_session_missing', 'Admin session middleware was not applied.')
+    throw new HttpError(500, 'admin_session_missing', 'Lỗi cấu hình phiên đăng nhập quản trị.')
   }
 
   return req.adminSession

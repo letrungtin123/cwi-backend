@@ -21,6 +21,7 @@ import {
 } from './submissionStatus.js'
 import { getSurveyScores, type SurveyScores } from './surveyScoring.js'
 import { readSubmittedSurveySourceCode } from '../surveySources/surveySourceCode.js'
+import { normalizePhoneNumber } from '../shared/phone.js'
 
 export type Participant = {
   companyName: string | null
@@ -141,12 +142,10 @@ function normalizeText(value: string) {
 }
 
 function normalizePhone(value: string) {
-  const compact = value.trim().replace(/[\s().-]/g, '')
+  const normalized = normalizePhoneNumber(value)
+  if (normalized) return normalized
 
-  if (/^0\d{9,10}$/.test(compact)) return `+84${compact.slice(1)}`
-  if (/^\+[1-9]\d{7,14}$/.test(compact)) return compact
-
-  validationError('invalid_phone', 'Phone number is invalid.', {
+  validationError('invalid_phone', 'Số điện thoại không hợp lệ.', {
     acceptedFormats: ['0901234567', '+84901234567'],
   })
 }
@@ -268,7 +267,7 @@ function normalizeRoundtable(raw: RawSubmission['roundtableRegistration']): Roun
   if (!raw?.registered) return null
 
   if (!raw.email || !raw.fullName) {
-    validationError('invalid_roundtable_registration', 'Roundtable registration requires fullName and email.', {
+    validationError('invalid_roundtable_registration', 'Đăng ký CEO Roundtable cần họ tên và email.', {
       roundtableRegistration: raw,
     })
   }
@@ -290,14 +289,14 @@ function assertAnswerSet(status: SubmissionStatus, answersByIdx: Map<number, Nor
   const extra = Array.from(answersByIdx.keys()).filter((idx) => !allowed.has(idx))
 
   if (missing.length) {
-    validationError('missing_required_answers', 'Submission is missing required answers.', {
+    validationError('missing_required_answers', 'Bài khảo sát còn thiếu câu trả lời bắt buộc.', {
       missing,
       submissionStatus: status,
     })
   }
 
   if (extra.length) {
-    validationError('unexpected_answers', 'Submission contains answers that are not allowed for this status.', {
+    validationError('unexpected_answers', 'Bài khảo sát có câu trả lời không phù hợp với trạng thái gửi.', {
       extra,
       submissionStatus: status,
     })
@@ -312,7 +311,7 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
   const parsed = rawSubmissionSchema.safeParse(payload)
 
   if (!parsed.success) {
-    validationError('invalid_payload', 'Survey submission payload is invalid.', {
+    validationError('invalid_payload', 'Dữ liệu bài khảo sát không hợp lệ.', {
       issues: parsed.error.issues.map((issue) => ({
         message: issue.message,
         path: issue.path,
@@ -325,7 +324,7 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
   // A page opened before a question-set release still holds the previous
   // edition's questions; reject it instead of storing answers under new text.
   if (raw.surveyVersion !== SURVEY_VERSION) {
-    validationError('survey_version_mismatch', 'Survey questions are outdated. Reload the page and submit again.', {
+    validationError('survey_version_mismatch', 'Bộ câu hỏi khảo sát đã được cập nhật. Vui lòng tải lại trang và gửi lại.', {
       expectedSurveyVersion: SURVEY_VERSION,
       receivedSurveyVersion: raw.surveyVersion ?? null,
     })
@@ -334,19 +333,19 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
   const idempotencyKey = raw.idempotencyKey ?? headerIdempotencyKey
 
   if (raw.idempotencyKey && headerIdempotencyKey && raw.idempotencyKey !== headerIdempotencyKey) {
-    validationError('idempotency_key_mismatch', 'Body and header idempotency keys do not match.')
+    validationError('idempotency_key_mismatch', 'Mã chống gửi trùng trong nội dung và header không khớp.')
   }
 
   if (idempotencyKey) {
     const idempotencyKeyResult = idempotencyKeySchema.safeParse(idempotencyKey)
     if (!idempotencyKeyResult.success) {
-      validationError('invalid_idempotency_key', 'Idempotency key is invalid.')
+      validationError('invalid_idempotency_key', 'Mã chống gửi trùng không hợp lệ.')
     }
   }
 
   const rule = SUBMISSION_STATUS_RULES[raw.submissionStatus]
   if (raw.privacyConsent !== rule.expectedPrivacyConsent) {
-    validationError('invalid_privacy_consent', 'privacyConsent does not match submissionStatus.', {
+    validationError('invalid_privacy_consent', 'Lựa chọn đồng ý bảo mật không khớp với trạng thái gửi.', {
       expectedPrivacyConsent: rule.expectedPrivacyConsent,
       receivedPrivacyConsent: raw.privacyConsent,
       submissionStatus: raw.submissionStatus,
@@ -379,7 +378,7 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
   const normalizedRoundtableRegistration = normalizeRoundtable(raw.roundtableRegistration)
   const participantEmail = normalizeEmail(raw.participant.email)
   if (normalizedRoundtableRegistration && normalizedRoundtableRegistration.email !== participantEmail) {
-    validationError('roundtable_email_mismatch', 'Roundtable registration email must match participant email.')
+    validationError('roundtable_email_mismatch', 'Email đăng ký CEO Roundtable phải trùng với email người làm khảo sát.')
   }
 
   const normalizedWithoutHash: Omit<NormalizedSurveySubmission, 'payloadHash' | 'sourceCode'> = {

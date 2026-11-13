@@ -58,7 +58,7 @@ export async function createSupabaseAuthUser(
   if (!response.ok) return failed(response)
   const user = (await response.json()) as { id?: unknown }
   if (typeof user.id !== 'string') {
-    throw new HttpError(502, 'auth_provider_invalid_response', 'Authentication provider returned an invalid response.')
+    throw new HttpError(502, 'auth_provider_invalid_response', 'Dịch vụ đăng nhập trả về dữ liệu không hợp lệ. Vui lòng thử lại sau.')
   }
   return user.id
 }

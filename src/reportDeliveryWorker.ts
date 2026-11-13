@@ -13,10 +13,10 @@ import { PgReportDeliveryRepository } from './modules/reportDelivery/reportDeliv
 import { SmtpDeliveryError, SmtpReportMailer } from './modules/reportDelivery/smtpMailer.js'
 import { ReportAssetStorage } from './modules/reports/reportAssetStorage.js'
 import { installProcessGuards, logIdlePoolError } from './processGuards.js'
+import { uuidPattern } from './http/ids.js'
 
 const logger = createLogger(env.logLevel)
 installProcessGuards(logger, 'cwi-report-delivery-worker')
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 // On SIGTERM, wait this long for emails that are being sent right now (PM2 kill_timeout is 30 s).
 const SHUTDOWN_DRAIN_MS = 25_000
 const workerId = 'report-delivery-' + randomUUID()

@@ -6,8 +6,8 @@ import type { ReportAccessTokenService } from './reportAccessToken.js'
 import { ReportAssetStorageError, type ReportAssetStorage } from './reportAssetStorage.js'
 import { reportDeferral } from './reportDeferral.js'
 import type { PgReportRepository } from './reportRepository.js'
+import { uuidPattern } from '../../http/ids.js'
 
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function assertUuid(id: string | undefined) {
   if (!id || !uuidPattern.test(id)) throw new HttpError(404, 'report_not_found', 'Báo cáo không tồn tại hoặc quyền truy cập đã hết hạn.')

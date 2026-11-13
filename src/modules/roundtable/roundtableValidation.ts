@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { HttpError } from '../../http/errors.js'
 import { CURRENT_ROUNDTABLE_QUARTER } from './roundtableQuarter.js'
+import { normalizePhoneNumber } from '../shared/phone.js'
 
 export type NormalizedRoundtableRegistration = {
   clientMeta: Record<string, unknown>
@@ -72,10 +73,8 @@ function normalizeText(value: string) {
 
 // Same canonical form as the survey phone so both tables can be matched.
 function normalizePhone(value: string) {
-  const compact = value.trim().replace(/[\s().-]/g, '')
-
-  if (/^0\d{9,10}$/.test(compact)) return `+84${compact.slice(1)}`
-  if (/^\+[1-9]\d{7,14}$/.test(compact)) return compact
+  const normalized = normalizePhoneNumber(value)
+  if (normalized) return normalized
 
   validationError('invalid_roundtable_phone', 'Số điện thoại không hợp lệ.', {
     acceptedFormats: ['0901234567', '+84901234567'],
@@ -90,7 +89,7 @@ export function normalizeRoundtableRegistration(payload: unknown, headerIdempote
   const parsed = rawRoundtableRegistrationSchema.safeParse(payload)
 
   if (!parsed.success) {
-    validationError('invalid_roundtable_payload', 'Roundtable registration payload is invalid.', {
+    validationError('invalid_roundtable_payload', 'Thông tin đăng ký CEO Roundtable không hợp lệ.', {
       issues: parsed.error.issues.map((issue) => ({
         message: issue.message,
         path: issue.path,
@@ -102,13 +101,13 @@ export function normalizeRoundtableRegistration(payload: unknown, headerIdempote
   const idempotencyKey = raw.idempotencyKey ?? headerIdempotencyKey
 
   if (raw.idempotencyKey && headerIdempotencyKey && raw.idempotencyKey !== headerIdempotencyKey) {
-    validationError('idempotency_key_mismatch', 'Body and header idempotency keys do not match.')
+    validationError('idempotency_key_mismatch', 'Mã chống gửi trùng trong nội dung và header không khớp.')
   }
 
   if (idempotencyKey) {
     const idempotencyKeyResult = idempotencyKeySchema.safeParse(idempotencyKey)
     if (!idempotencyKeyResult.success) {
-      validationError('invalid_idempotency_key', 'Idempotency key is invalid.')
+      validationError('invalid_idempotency_key', 'Mã chống gửi trùng không hợp lệ.')
     }
   }
 
@@ -134,7 +133,7 @@ export function normalizeRoundtableEmailCheck(payload: unknown): NormalizedRound
   const parsed = rawRoundtableEmailCheckSchema.safeParse(payload)
 
   if (!parsed.success) {
-    validationError('invalid_roundtable_email_check', 'Roundtable email is invalid.')
+    validationError('invalid_roundtable_email_check', 'Email đăng ký CEO Roundtable không hợp lệ.')
   }
 
   return { email: normalizeEmail(parsed.data.email) }

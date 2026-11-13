@@ -25,7 +25,7 @@ export class AuthService {
     const adminUser = await this.repository.findActiveAdminUser(supabaseUser.id, supabaseUser.email)
 
     if (!adminUser) {
-      throw new HttpError(403, 'admin_user_not_allowed', 'This account is not allowed to access the dashboard.')
+      throw new HttpError(403, 'admin_user_not_allowed', 'Tài khoản này không được phép vào trang quản trị.')
     }
 
     const sessionToken = createOpaqueToken()
@@ -59,12 +59,12 @@ export class AuthService {
 
   async resolveSession(sessionToken: string): Promise<AdminSession> {
     if (!sessionToken) {
-      throw new HttpError(401, 'unauthorized', 'Authentication is required.')
+      throw new HttpError(401, 'unauthorized', 'Vui lòng đăng nhập để tiếp tục.')
     }
 
     const session = await this.repository.findSessionByTokenHash(sha256Hex(sessionToken))
     if (!session) {
-      throw new HttpError(401, 'session_invalid', 'Session is invalid or expired.')
+      throw new HttpError(401, 'session_invalid', 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.')
     }
 
     return session
@@ -72,11 +72,11 @@ export class AuthService {
 
   verifyCsrfToken(session: AdminSession, csrfToken: string) {
     if (!csrfToken) {
-      throw new HttpError(403, 'csrf_token_missing', 'CSRF token is required.')
+      throw new HttpError(403, 'csrf_token_missing', 'Thiếu mã bảo vệ CSRF. Vui lòng tải lại trang.')
     }
 
     if (!constantTimeEqual(sha256Hex(csrfToken), session.csrfTokenHash)) {
-      throw new HttpError(403, 'csrf_token_invalid', 'CSRF token is invalid.')
+      throw new HttpError(403, 'csrf_token_invalid', 'Mã bảo vệ CSRF không hợp lệ. Vui lòng tải lại trang.')
     }
   }
 
@@ -102,7 +102,7 @@ export class AuthService {
     }
     const authUserId = await this.repository.getAuthUserId(session.user.id)
     if (!authUserId || authUserId !== supabaseUserId) {
-      throw new HttpError(403, 'admin_user_not_allowed', 'This account is not allowed to access the dashboard.')
+      throw new HttpError(403, 'admin_user_not_allowed', 'Tài khoản này không được phép vào trang quản trị.')
     }
     await setSupabaseAuthPassword(this.config, authUserId, input.newPassword)
     await this.repository.revokeOtherSessions(session.user.id, session.id)

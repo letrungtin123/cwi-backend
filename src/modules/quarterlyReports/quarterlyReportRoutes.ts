@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { Router, type Request, type Response } from 'express'
+import { Router, type Response } from 'express'
 import rateLimit from 'express-rate-limit'
 import type { RuntimeConfig } from '../../config/runtime.js'
 import { decodeCursor } from '../../http/cursor.js'
-import { createAdminRequestRateLimit, getRequiredAdminSession, requireAdminSession } from '../../http/adminSession.js'
+import { createAdminRequestRateLimit, requireAdminSession, requireContentManager } from '../../http/adminSession.js'
 import { HttpError } from '../../http/errors.js'
 import { getRequestMeta } from '../../http/requestMeta.js'
 import type { AuthService } from '../auth/authService.js'
@@ -14,10 +14,9 @@ import { ReportAssetStorageError, type ReportAssetStorage } from '../reports/rep
 import { QuarterlyReportDownloadTokenService } from './quarterlyReportDownloadToken.js'
 import { PgQuarterlyReportRepository } from './quarterlyReportRepository.js'
 import { normalizeQuarterlyReportDownload, normalizeQuarterlyReportUpload } from './quarterlyReportValidation.js'
-import { canManageContent } from '../auth/adminRoles.js'
+import { uuidPattern } from '../../http/ids.js'
 
 const slugPattern = /^q[1-4]-\d{4}$/
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const validRangePattern = /^bytes=\d*-\d*$/
 
 function assertEnabled(config: RuntimeConfig) {
@@ -26,11 +25,6 @@ function assertEnabled(config: RuntimeConfig) {
   }
 }
 
-function assertAdmin(req: Request) {
-  const session = getRequiredAdminSession(req)
-  if (!canManageContent(session.user.role)) throw new HttpError(403, 'admin_required', 'Bạn không có quyền thực hiện thao tác này.')
-  return session
-}
 
 function parseSlug(value: unknown) {
   if (typeof value !== 'string' || !slugPattern.test(value)) throw new HttpError(404, 'quarterly_report_not_found', 'Không tìm thấy báo cáo quý.')
@@ -181,7 +175,7 @@ export function createQuarterlyReportAdminRouter(
     let saved = false
     try {
       assertEnabled(config)
-      const session = assertAdmin(req)
+      const session = requireContentManager(req)
       upload = await parsePdfUpload(req, config.quarterlyReportUploadMaxBytes, ['periodYear', 'periodQuarter', 'title', 'subtitle', 'activate'])
       const details = normalizeQuarterlyReportUpload(upload.fields)
       uploadedPath = `quarterly/${details.periodYear}/q${details.periodQuarter}/${randomUUID()}.pdf`

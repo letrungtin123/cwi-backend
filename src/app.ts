@@ -78,26 +78,26 @@ function createCorsOptions(config: RuntimeConfig): cors.CorsOptions {
         callback(null, true)
         return
       }
-      callback(new HttpError(403, 'cors_origin_denied', 'CORS origin is not allowed.'))
+      callback(new HttpError(403, 'cors_origin_denied', 'Trang gửi yêu cầu không được phép truy cập hệ thống.'))
     },
   }
 }
 
 function handleNotFound(_req: Request, _res: Response, next: NextFunction) {
-  next(new HttpError(404, 'not_found', 'Route not found.'))
+  next(new HttpError(404, 'not_found', 'Không tìm thấy đường dẫn yêu cầu.'))
 }
 
 function requestBodyError(error: unknown) {
   if (error instanceof z.ZodError) {
-    return new HttpError(400, 'invalid_request', 'Request payload is invalid.', {
+    return new HttpError(400, 'invalid_request', 'Dữ liệu gửi lên không hợp lệ.', {
       issues: error.issues.map((issue) => ({ code: issue.code, message: issue.message, path: issue.path })),
     })
   }
   if (error instanceof SyntaxError && (error as SyntaxError & { type?: string }).type === 'entity.parse.failed') {
-    return new HttpError(400, 'invalid_json', 'Request body contains invalid JSON.')
+    return new HttpError(400, 'invalid_json', 'Dữ liệu gửi lên không đúng định dạng JSON.')
   }
   if (typeof error === 'object' && error !== null && 'type' in error && error.type === 'entity.too.large') {
-    return new HttpError(413, 'request_too_large', 'Request body is too large.')
+    return new HttpError(413, 'request_too_large', 'Dữ liệu gửi lên quá lớn.')
   }
   return null
 }
@@ -119,7 +119,7 @@ function handleError(logger: Logger) {
     }
     logger.error({ err: error, requestId: req.id }, 'Unhandled request error')
     res.status(500).json({
-      error: { code: 'internal_server_error', message: 'Internal server error.', requestId: req.id },
+      error: { code: 'internal_server_error', message: 'Hệ thống gặp lỗi. Vui lòng thử lại sau.', requestId: req.id },
     })
   }
 }
@@ -202,7 +202,7 @@ export function createApp(dependencies: AppDependencies) {
       noStore(res)
       res.json({ data: { service: 'cwi-backend', status: 'ready' } })
     } catch {
-      next(new HttpError(503, 'not_ready', 'Service dependencies are not ready.'))
+      next(new HttpError(503, 'not_ready', 'Hệ thống chưa sẵn sàng. Vui lòng thử lại sau.'))
     }
   })
 
