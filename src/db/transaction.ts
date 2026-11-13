@@ -12,7 +12,8 @@ export async function withTransaction<T>(
     await client.query('COMMIT')
     return result
   } catch (error) {
-    await client.query('ROLLBACK')
+    // A failing ROLLBACK (e.g. the connection already broke) must not hide the original error.
+    await client.query('ROLLBACK').catch(() => undefined)
     throw error
   } finally {
     client.release()

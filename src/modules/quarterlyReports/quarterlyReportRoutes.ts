@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { Readable } from 'node:stream'
 import { Router, type Request, type Response } from 'express'
 import rateLimit from 'express-rate-limit'
 import type { RuntimeConfig } from '../../config/runtime.js'
@@ -8,7 +7,8 @@ import { createAdminRequestRateLimit, getRequiredAdminSession, requireAdminSessi
 import { HttpError } from '../../http/errors.js'
 import { getRequestMeta } from '../../http/requestMeta.js'
 import type { AuthService } from '../auth/authService.js'
-import { contentDispositionAttachment } from '../reportDelivery/reportDeliveryFilename.js'
+import { contentDispositionAttachment, contentDispositionInline } from '../reportDelivery/reportDeliveryFilename.js'
+import { streamToResponse } from '../../http/streamResponse.js'
 import { MultipartUploadError, parsePdfUpload, removeParsedPdfUpload } from '../reportDelivery/reportDeliveryMultipart.js'
 import { ReportAssetStorageError, type ReportAssetStorage } from '../reports/reportAssetStorage.js'
 import { QuarterlyReportDownloadTokenService } from './quarterlyReportDownloadToken.js'
@@ -72,12 +72,12 @@ async function sendPdf(res: Response, storage: ReportAssetStorage, input: { atta
   res.status(asset.status)
   res.setHeader('Accept-Ranges', 'bytes')
   res.setHeader('Cache-Control', 'private, no-store, no-transform')
-  res.setHeader('Content-Disposition', input.attachment ? contentDispositionAttachment(input.fileName) : `inline; filename="${input.fileName.replace(/["\\]/g, '_')}"`)
+  res.setHeader('Content-Disposition', input.attachment ? contentDispositionAttachment(input.fileName) : contentDispositionInline(input.fileName))
   res.setHeader('Content-Type', 'application/pdf')
   res.setHeader('X-Content-Type-Options', 'nosniff')
   if (asset.contentLength) res.setHeader('Content-Length', asset.contentLength)
   if (asset.contentRange) res.setHeader('Content-Range', asset.contentRange)
-  Readable.fromWeb(asset.body as globalThis.ReadableStream<Uint8Array>).pipe(res)
+  await streamToResponse(asset.body as globalThis.ReadableStream<Uint8Array>, res)
 }
 
 export function createQuarterlyReportPublicRouter(

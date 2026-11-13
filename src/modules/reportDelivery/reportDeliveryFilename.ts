@@ -30,10 +30,20 @@ export function normalizeReportFileName(value: string | null | undefined) {
   return baseName.slice(0, 176) + '.pdf'
 }
 
-export function contentDispositionAttachment(value: string | null | undefined) {
+// Header values must be Latin-1, so a Vietnamese file name goes in filename* (RFC 5987) with an
+// ASCII copy in filename for old clients. Setting it raw would throw ERR_INVALID_CHAR.
+function contentDisposition(type: 'attachment' | 'inline', value: string | null | undefined) {
   const fileName = normalizeReportFileName(value)
   const asciiFallback = fileName
     .replace(/[^\x20-\x7e]/g, '_')
     .replace(/[\\"]/g, '_')
-  return 'attachment; filename="' + asciiFallback + '"; filename*=UTF-8\'\'' + encodeURIComponent(fileName)
+  return type + '; filename="' + asciiFallback + '"; filename*=UTF-8\'\'' + encodeURIComponent(fileName)
+}
+
+export function contentDispositionAttachment(value: string | null | undefined) {
+  return contentDisposition('attachment', value)
+}
+
+export function contentDispositionInline(value: string | null | undefined) {
+  return contentDisposition('inline', value)
 }

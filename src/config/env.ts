@@ -1,5 +1,6 @@
 import dotenv from 'dotenv'
 import { z } from 'zod'
+import { normalizeTrustProxy } from './trustProxy.js'
 
 dotenv.config({ path: process.env.CWI_ENV_FILE || '.env' })
 
@@ -9,6 +10,9 @@ const booleanSchema = z.preprocess((value) => {
   if (typeof value === 'string') return value === 'true'
   return value
 }, z.boolean().optional())
+
+// See trustProxy.ts: "true" = one proxy hop, never "trust every X-Forwarded-For entry".
+const trustProxySchema = z.preprocess(normalizeTrustProxy, z.union([z.literal(false), z.number().int().min(1).max(5)]))
 
 const nullablePathSchema = z.preprocess((value) => {
   if (typeof value !== 'string') return value
@@ -113,7 +117,7 @@ const envSchema = z
     SUPABASE_AUTH_URL: z.string().url().optional(),
     SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
     SUPABASE_STORAGE_URL: z.string().url().default('http://127.0.0.1:55321/storage/v1'),
-    TRUST_PROXY: booleanSchema.default(false),
+    TRUST_PROXY: trustProxySchema.default(false),
   })
   .superRefine((value, ctx) => {
     if (value.NODE_ENV !== 'test' && !value.DATABASE_URL) {

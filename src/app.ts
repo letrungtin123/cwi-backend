@@ -104,6 +104,12 @@ function requestBodyError(error: unknown) {
 
 function handleError(logger: Logger) {
   return (error: unknown, req: Request, res: Response, _next: NextFunction) => {
+    // A response that already started (e.g. a file download) cannot carry an error body.
+    if (res.headersSent) {
+      logger.warn({ err: error, requestId: req.id }, 'Request failed after the response started')
+      res.destroy()
+      return
+    }
     const safeError = requestBodyError(error) ?? error
     if (isHttpError(safeError)) {
       res.status(safeError.statusCode).json({
@@ -111,11 +117,49 @@ function handleError(logger: Logger) {
       })
       return
     }
-    logger.error({ error, requestId: req.id }, 'Unhandled request error')
+    logger.error({ err: error, requestId: req.id }, 'Unhandled request error')
     res.status(500).json({
       error: { code: 'internal_server_error', message: 'Internal server error.', requestId: req.id },
     })
   }
+}
+
+// Personal-report and download links carry their access token in the query string; keep it out of
+// request logs.
+function maskTokensInUrl(url: string | undefined) {
+  return url?.replace(/([?&](?:token|access_token|t)=)[^&#]*/gi, '$1[redacted]')
+}
+
+// Accept a caller's request id only if it looks like one; otherwise make our own.
+const requestIdPattern = /^[A-Za-z0-9._-]{8,80}$/
+
+// Requests to the admin API before login are not covered by the per-session admin limit, and each one
+// still costs a session lookup; cap them per client IP. Generous enough for several admins working
+// behind one office IP while the dashboard refreshes itself.
+const ADMIN_IP_RATE_LIMIT_PER_MINUTE = 600
+
+// Request logging: warn on 4xx, error on 5xx. Logs only what is needed to find a request: no
+// headers (cookies, tokens, client IPs) and no query tokens.
+export function createRequestLogger(logger: Logger) {
+  const pinoHttp = pinoHttpImport.default ?? pinoHttpImport
+  return pinoHttp({
+    autoLogging: {
+      ignore: (req) => ['/health', '/healthz', '/readyz'].includes(req.url ?? ''),
+    },
+    customLogLevel: (_req, res, error) => {
+      if (error || res.statusCode >= 500) return 'error'
+      if (res.statusCode >= 400) return 'warn'
+      return 'debug'
+    },
+    genReqId: (req: Request) => {
+      const supplied = req.get('x-request-id')
+      return supplied && requestIdPattern.test(supplied) ? supplied : randomUUID()
+    },
+    logger,
+    serializers: {
+      req: (req: { id?: unknown; method?: string; url?: string }) => ({ id: req.id, method: req.method, url: maskTokensInUrl(req.url) }),
+    },
+  })
 }
 
 function noStore(res: Response) {
@@ -127,19 +171,7 @@ export function createApp(dependencies: AppDependencies) {
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', config.trustProxy)
-  const pinoHttp = pinoHttpImport.default ?? pinoHttpImport
-  app.use(pinoHttp({
-    autoLogging: {
-      ignore: (req) => ['/health', '/healthz', '/readyz'].includes(req.url ?? ''),
-    },
-    customLogLevel: (_req, res, error) => {
-      if (error || res.statusCode >= 500) return 'error'
-      if (res.statusCode >= 400) return 'warn'
-      return 'debug'
-    },
-    genReqId: (req: Request) => req.get('x-request-id') || randomUUID(),
-    logger,
-  }))
+  app.use(createRequestLogger(logger))
   app.use(helmet())
   app.use(compression())
   app.use(cors(createCorsOptions(config)))
@@ -149,6 +181,12 @@ export function createApp(dependencies: AppDependencies) {
     skip: (req) => req.path === '/api/v1/auth/me' || req.path.startsWith('/api/v1/admin/'),
     standardHeaders: 'draft-7',
     windowMs: config.rateLimitWindowMs,
+  }))
+  app.use(['/api/v1/admin', '/api/v1/auth/me'], rateLimit({
+    legacyHeaders: false,
+    limit: ADMIN_IP_RATE_LIMIT_PER_MINUTE,
+    standardHeaders: 'draft-7',
+    windowMs: 60_000,
   }))
   app.use(express.json({ limit: config.requestBodyLimit }))
 

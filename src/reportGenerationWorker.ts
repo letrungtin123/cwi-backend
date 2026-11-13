@@ -7,9 +7,13 @@ import { ReportPdfRenderer } from './modules/reports/reportPdfRenderer.js'
 import { PgReportRepository } from './modules/reports/reportRepository.js'
 import { ReportServiceClient } from './modules/reports/reportServiceClient.js'
 import { ReportWorker } from './modules/reports/reportWorker.js'
+import { installProcessGuards, logIdlePoolError } from './processGuards.js'
 
 const logger = createLogger(env.logLevel)
+installProcessGuards(logger, 'cwi-report-generation-worker')
 let stopping = false
+// On SIGTERM, wait this long for the report being generated right now (PM2 kill_timeout is 30 s).
+const SHUTDOWN_DRAIN_MS = 25_000
 
 if (!env.reportServiceEnabled) {
   logger.info('Report generation worker is disabled by REPORT_SERVICE_ENABLED.')
@@ -20,6 +24,7 @@ if (!env.reportServiceEnabled) {
     databaseUrl: env.databaseUrl,
     idleTimeoutMillis: env.dbIdleTimeoutMs,
     max: Math.max(2, Math.min(env.dbPoolMax, 5)),
+    onError: logIdlePoolError(logger, 'cwi-report-generation-worker'),
     ssl: env.dbSsl,
   })
   const repository = new PgReportRepository(pool)
@@ -56,7 +61,7 @@ if (!env.reportServiceEnabled) {
     if (stopping) return
     stopping = true
     logger.info({ signal }, 'Shutting down report generation worker')
-    worker.stop()
+    await Promise.race([worker.stop(), new Promise((resolve) => setTimeout(resolve, SHUTDOWN_DRAIN_MS))])
     await pool.end()
     process.exit(0)
   }

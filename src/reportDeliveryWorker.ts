@@ -12,8 +12,13 @@ import { createLogger } from './logger.js'
 import { PgReportDeliveryRepository } from './modules/reportDelivery/reportDeliveryRepository.js'
 import { SmtpDeliveryError, SmtpReportMailer } from './modules/reportDelivery/smtpMailer.js'
 import { ReportAssetStorage } from './modules/reports/reportAssetStorage.js'
+import { installProcessGuards, logIdlePoolError } from './processGuards.js'
 
 const logger = createLogger(env.logLevel)
+installProcessGuards(logger, 'cwi-report-delivery-worker')
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+// On SIGTERM, wait this long for emails that are being sent right now (PM2 kill_timeout is 30 s).
+const SHUTDOWN_DRAIN_MS = 25_000
 const workerId = 'report-delivery-' + randomUUID()
 const exchange = 'cwi.report.delivery'
 const dispatchQueue = 'cwi.report.delivery.dispatch'
@@ -182,6 +187,7 @@ async function run() {
     databaseUrl: env.databaseUrl,
     idleTimeoutMillis: env.dbIdleTimeoutMs,
     max: Math.max(2, Math.min(env.dbPoolMax, 5)),
+    onError: logIdlePoolError(logger, 'cwi-report-delivery-worker'),
     ssl: env.dbSsl,
   })
   try {
@@ -230,6 +236,32 @@ async function run() {
   const channel = await connection.createConfirmChannel()
   const dispatchConsumer = await connection.createChannel()
   const sendConsumer = await connection.createChannel()
+  // If RabbitMQ goes away or the broker closes a channel, consumers stop silently. Exit so PM2
+  // restarts the worker with fresh connections; claimed jobs are recovered by their lease expiry.
+  const exitOnLostBroker = (what: string) => (error?: unknown) => {
+    if (stopping) return
+    logger.error({ err: error, what }, 'RabbitMQ connection lost, restarting the worker')
+    process.exit(1)
+  }
+  connection.on('error', (error: unknown) => logger.error({ err: error }, 'RabbitMQ connection error'))
+  connection.on('close', exitOnLostBroker('connection'))
+  for (const [name, ch] of [['publish', channel], ['dispatch', dispatchConsumer], ['send', sendConsumer]] as const) {
+    ch.on('error', (error: unknown) => logger.error({ err: error, channel: name }, 'RabbitMQ channel error'))
+    ch.on('close', exitOnLostBroker(name + ' channel'))
+  }
+  // ack/nack throw if the channel closed meanwhile; the broker then redelivers the message anyway.
+  const settle = (action: () => void) => {
+    try {
+      action()
+    } catch (error) {
+      logger.warn({ err: error }, 'Could not acknowledge a RabbitMQ message')
+    }
+  }
+  const inFlight = new Set<Promise<unknown>>()
+  const track = (work: Promise<unknown>) => {
+    inFlight.add(work)
+    void work.finally(() => inFlight.delete(work))
+  }
   await channel.assertExchange(exchange, 'direct', { durable: true })
   await channel.assertQueue(dispatchQueue, { durable: true })
   await channel.assertQueue(sendQueue, { durable: true })
@@ -238,56 +270,78 @@ async function run() {
   await dispatchConsumer.prefetch(1)
   await sendConsumer.prefetch(Math.max(1, env.reportDeliveryConcurrency * env.reportDeliveryPrefetch))
 
-  await dispatchConsumer.consume(dispatchQueue, (message) => {
+  const dispatchSubscription = await dispatchConsumer.consume(dispatchQueue, (message) => {
     if (!message) return
-    void consumeDispatch(channel, repository, message)
-      .then(() => dispatchConsumer.ack(message))
-      .catch(async (error) => {
-        const { campaignId } = messageJson(message)
-        if (campaignId) await repository.releaseCampaignDispatch(campaignId).catch((releaseError) => logger.error({ error: releaseError, campaignId }, 'Dispatch lease release failed'))
-        logger.error({ error, campaignId }, 'Dispatch message failed; requeueing')
-        await sleep(env.reportDeliveryRequeueDelayMs)
-        dispatchConsumer.nack(message, false, true)
-      })
-  })
-  await sendConsumer.consume(sendQueue, (message) => {
-    if (!message) return
-    const { jobId } = messageJson(message)
-    if (!jobId) {
-      logger.warn({ messageId: message.properties.messageId ?? null }, 'Invalid send message discarded')
-      sendConsumer.ack(message)
+    const { campaignId } = messageJson(message)
+    // A malformed message would fail the same way forever; drop it instead of requeueing.
+    if (typeof campaignId !== 'string' || !uuidPattern.test(campaignId)) {
+      logger.warn({ messageId: message.properties.messageId ?? null }, 'Invalid dispatch message discarded')
+      settle(() => dispatchConsumer.ack(message))
       return
     }
-    void consumeSend(repository, manualStorage, generatedStorage, mailer, message)
-      .then(() => sendConsumer.ack(message))
+    track(consumeDispatch(channel, repository, message)
+      .then(() => settle(() => dispatchConsumer.ack(message)))
+      .catch(async (error) => {
+        await repository.releaseCampaignDispatch(campaignId).catch((releaseError) => logger.error({ error: releaseError, campaignId }, 'Dispatch lease release failed'))
+        logger.error({ error, campaignId }, 'Dispatch message failed; requeueing')
+        await sleep(env.reportDeliveryRequeueDelayMs)
+        settle(() => dispatchConsumer.nack(message, false, true))
+      }))
+  })
+  const sendSubscription = await sendConsumer.consume(sendQueue, (message) => {
+    if (!message) return
+    const { jobId } = messageJson(message)
+    if (typeof jobId !== 'string' || !uuidPattern.test(jobId)) {
+      logger.warn({ messageId: message.properties.messageId ?? null }, 'Invalid send message discarded')
+      settle(() => sendConsumer.ack(message))
+      return
+    }
+    track(consumeSend(repository, manualStorage, generatedStorage, mailer, message)
+      .then(() => settle(() => sendConsumer.ack(message)))
       .catch(async (error) => {
         logger.error({ error, jobId }, 'Send message failed; requeueing')
         await sleep(env.reportDeliveryRequeueDelayMs)
-        sendConsumer.nack(message, false, true)
-      })
+        settle(() => sendConsumer.nack(message, false, true))
+      }))
   })
 
   try {
     while (!stopping) {
-      await repository.expireStaleCampaigns()
-      const recoveredCampaigns = await repository.recoverStaleSendingJobs(env.reportDeliveryLockMs)
-      for (const campaignId of recoveredCampaigns) await repository.refreshCampaign(campaignId)
-      const campaigns = await repository.listActiveCampaigns(10)
-      for (const campaignId of campaigns) {
-        await publishCampaign(channel, campaignId)
-        await publishJobs(channel, repository, campaignId)
-        await repository.refreshCampaign(campaignId)
+      try {
+        await publishDueWork()
+      } catch (error) {
+        // A database or broker hiccup must not end the worker; wait and try again.
+        logger.error({ error }, 'Report delivery worker iteration failed')
       }
-      await publishAutomaticJobs(channel, repository)
       await sleep(env.reportWorkerLoopIntervalMs)
     }
   } finally {
+    // Stop taking new messages, let emails that are being sent finish, then close everything.
+    await dispatchConsumer.cancel(dispatchSubscription.consumerTag).catch(() => undefined)
+    await sendConsumer.cancel(sendSubscription.consumerTag).catch(() => undefined)
+    if (inFlight.size) {
+      logger.info({ inFlight: inFlight.size }, 'Waiting for emails in progress before stopping')
+      await Promise.race([Promise.allSettled(inFlight), sleep(SHUTDOWN_DRAIN_MS)])
+    }
     await dispatchConsumer.close().catch(() => undefined)
     await sendConsumer.close().catch(() => undefined)
     await channel.close().catch(() => undefined)
     await connection.close().catch(() => undefined)
     mailer.close()
     await pool.end()
+  }
+
+  async function publishDueWork() {
+    await repository.expireStaleCampaigns()
+    const recoveredCampaigns = await repository.recoverStaleSendingJobs(env.reportDeliveryLockMs)
+    for (const campaignId of recoveredCampaigns) await repository.refreshCampaign(campaignId)
+    const campaigns = await repository.listActiveCampaigns(10)
+    for (const campaignId of campaigns) {
+      await publishCampaign(channel, campaignId)
+      await publishJobs(channel, repository, campaignId)
+      await repository.refreshCampaign(campaignId)
+    }
+    await publishAutomaticJobs(channel, repository)
   }
 }
 

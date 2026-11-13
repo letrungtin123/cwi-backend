@@ -7,7 +7,7 @@ describe('quarterly report validation', () => {
   it('normalizes a valid gated-download lead and Vietnamese mobile number', () => {
     const value = normalizeQuarterlyReportDownload({
       clientMeta: { app: 'source4' },
-      email: '  Hq@Nesso.com.vn ',
+      email: '  Hq@Example.com ',
       fullName: '  Nguyen   Van   An ',
       idempotencyKey: 'source4-quarterly-report:test-1234',
       phone: '090 123 4567',
@@ -16,7 +16,7 @@ describe('quarterly report validation', () => {
     }, 'source4-quarterly-report:test-1234')
 
     expect(value).toMatchObject({
-      email: 'hq@nesso.com.vn',
+      email: 'hq@example.com',
       fullName: 'Nguyen Van An',
       phone: '+84901234567',
       position: 'CEO',

@@ -8,6 +8,35 @@ import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 
+// The report HTML comes from cwi-ai and contains participant text (name, position, free-text
+// answers). Chrome renders it from a file:// URL, so a payload slipping through cwi-ai could try
+// to load local files or internal services into the PDF that is then e-mailed out. The report is
+// fully self-contained (no scripts; fonts and images are data: URLs), so everything else is
+// blocked. This is the same policy the web view of the report uses (publicReportRoutes.ts).
+const RENDER_CSP = "default-src 'none'; base-uri 'none'; connect-src 'none'; font-src data:; form-action 'none'; frame-src 'none'; img-src data: blob:; object-src 'none'; script-src 'none'; style-src 'unsafe-inline'"
+
+export function withRenderCsp(html: string) {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${RENDER_CSP}">`
+  const head = /<head(\s[^>]*)?>/i.exec(html)
+  if (head) return html.slice(0, head.index + head[0].length) + meta + html.slice(head.index + head[0].length)
+  const root = /<html(\s[^>]*)?>/i.exec(html)
+  if (root) return html.slice(0, root.index + root[0].length) + `<head>${meta}</head>` + html.slice(root.index + root[0].length)
+  return `<head>${meta}</head>` + html
+}
+
+// Chrome gets only what it needs to start and find fonts, never the backend's secrets (database
+// URL, storage and mail keys) that dotenv loaded into process.env.
+const CHROME_ENV_KEYS = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'TMPDIR', 'FONTCONFIG_PATH', 'FONTCONFIG_FILE', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_RUNTIME_DIR', 'SystemRoot', 'TEMP', 'TMP', 'LOCALAPPDATA', 'PROGRAMFILES', 'ProgramFiles(x86)']
+
+function chromeEnvironment(): NodeJS.ProcessEnv {
+  const result: NodeJS.ProcessEnv = {}
+  for (const key of CHROME_ENV_KEYS) {
+    const value = process.env[key]
+    if (value !== undefined) result[key] = value
+  }
+  return result
+}
+
 export class PdfRenderError extends Error {
   readonly code: string
   readonly retryable: boolean
@@ -115,6 +144,7 @@ export class ReportPdfRenderer {
     const browserPath = await findBrowser(this.config.browserPath)
     const tempDir = path.join(tmpdir(), `cwi-report-${randomUUID()}`)
     const tempPdfPath = path.join(tempDir, 'report.pdf')
+    const renderHtmlPath = path.join(tempDir, 'render.html')
     const finalPdfPath = path.join(storedHtml.reportDir, 'report.pdf')
     const browserArgs = [
       '--headless=new',
@@ -123,20 +153,26 @@ export class ReportPdfRenderer {
       '--disable-extensions',
       '--disable-gpu',
       '--no-first-run',
+      // Scripts in the report are blocked by the CSP added to the rendered copy. Do not use
+      // --blink-settings=scriptEnabled=false: Chrome then silently writes no PDF at all.
+      // A throw-away profile inside the temp folder, removed with it after rendering.
+      `--user-data-dir=${path.join(tempDir, 'profile')}`,
+      ...(this.config.disableSandbox ? ['--no-sandbox'] : []),
       '--print-to-pdf-no-header',
       `--print-to-pdf=${tempPdfPath}`,
-      pathToFileURL(storedHtml.htmlPath).toString(),
+      pathToFileURL(renderHtmlPath).toString(),
     ]
-
-    if (this.config.disableSandbox) browserArgs.splice(6, 0, '--no-sandbox')
 
     await mkdir(tempDir, { recursive: true })
 
     try {
+      // Render a copy with the CSP added; the stored HTML (also uploaded for the web view) is untouched.
+      await writeFile(renderHtmlPath, withRenderCsp(await readFile(storedHtml.htmlPath, 'utf8')), 'utf8')
       await execFileAsync(
         browserPath,
         browserArgs,
         {
+          env: chromeEnvironment(),
           timeout: this.config.renderTimeoutMs,
           windowsHide: true,
         },

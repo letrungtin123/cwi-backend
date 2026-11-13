@@ -39,5 +39,6 @@ export type RuntimeConfig = {
   rateLimitMax: number
   rateLimitWindowMs: number
   requestBodyLimit: string
-  trustProxy: boolean
+  // false, or the number of proxy hops in front of the API (see TRUST_PROXY in env.ts).
+  trustProxy: false | number
 }

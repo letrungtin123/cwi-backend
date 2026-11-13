@@ -20,13 +20,16 @@ import { PgReportDeliveryRepository } from './modules/reportDelivery/reportDeliv
 import { SmtpReportMailer } from './modules/reportDelivery/smtpMailer.js'
 import { QuarterlyReportDownloadTokenService } from './modules/quarterlyReports/quarterlyReportDownloadToken.js'
 import { PgQuarterlyReportRepository } from './modules/quarterlyReports/quarterlyReportRepository.js'
+import { installProcessGuards, logIdlePoolError } from './processGuards.js'
 
 const logger = createLogger(env.logLevel)
+installProcessGuards(logger, 'cwi-backend')
 const pool = createDbPool({
   connectionTimeoutMillis: env.dbConnectionTimeoutMs,
   databaseUrl: env.databaseUrl,
   idleTimeoutMillis: env.dbIdleTimeoutMs,
   max: env.dbPoolMax,
+  onError: logIdlePoolError(logger, 'cwi-backend'),
   ssl: env.dbSsl,
 })
 
@@ -138,8 +141,17 @@ const server = app.listen(env.port, env.host, () => {
   }, 'CWI backend listening')
 })
 
+// PM2 waits kill_timeout (30 s, deploy/ecosystem.config.cjs) before killing the process; finish
+// open requests first, then give up a little before that.
+const SHUTDOWN_GRACE_MS = 25_000
+
 async function shutdown(signal: string) {
   logger.info({ signal }, 'Shutting down CWI backend')
+  setTimeout(() => {
+    logger.warn('Open requests did not finish in time, exiting')
+    process.exit(1)
+  }, SHUTDOWN_GRACE_MS).unref()
+  server.closeIdleConnections()
   server.close(async (error) => {
     if (error) {
       logger.error({ error }, 'HTTP server shutdown failed')

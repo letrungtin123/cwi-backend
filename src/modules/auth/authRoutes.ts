@@ -20,6 +20,16 @@ const loginSchema = z.object({
   password: z.string().min(1).max(512),
 })
 
+// Failed sign-ins allowed per email address before that address is paused. This stops password
+// guessing against one account even when the attempts come from many IP addresses.
+const LOGIN_FAILURES_PER_EMAIL = 10
+const LOGIN_FAILURE_WINDOW_MS = 15 * 60_000
+
+function loginEmailKey(body: unknown) {
+  const email = typeof body === 'object' && body !== null && 'email' in body ? (body as { email?: unknown }).email : undefined
+  return typeof email === 'string' && email.trim() ? email.trim().toLowerCase().slice(0, 254) : null
+}
+
 export function createAuthRouter(authService: AuthService, config: RuntimeConfig) {
   const router = Router()
   const requireSession = requireAdminSession(authService, config)
@@ -31,6 +41,18 @@ export function createAuthRouter(authService: AuthService, config: RuntimeConfig
       limit: config.auth.loginRateLimitMax,
       standardHeaders: 'draft-7',
       windowMs: config.auth.loginRateLimitWindowMs,
+    }),
+    rateLimit({
+      handler: (_req, res) => {
+        res.status(429).json({ error: { code: 'too_many_login_attempts', message: 'Tài khoản này đã đăng nhập sai quá nhiều lần. Vui lòng thử lại sau 15 phút.' } })
+      },
+      keyGenerator: (req) => `login-email:${loginEmailKey(req.body)}`,
+      legacyHeaders: false,
+      limit: LOGIN_FAILURES_PER_EMAIL,
+      skip: (req) => loginEmailKey(req.body) === null,
+      skipSuccessfulRequests: true,
+      standardHeaders: 'draft-7',
+      windowMs: LOGIN_FAILURE_WINDOW_MS,
     }),
     async (req, res, next) => {
       try {

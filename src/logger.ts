@@ -1,7 +1,8 @@
-import pino, { type Logger } from 'pino'
+import pino, { type DestinationStream, type Logger } from 'pino'
 
-export function createLogger(level: string): Logger {
-  return pino({
+// destination: only tests pass one, to read what would be logged; normally logs go to stdout.
+export function createLogger(level: string, destination?: DestinationStream): Logger {
+  const options: pino.LoggerOptions = {
     level,
     redact: {
       censor: '[redacted]',
@@ -28,7 +29,20 @@ export function createLogger(level: string): Logger {
         'res.headers.set-cookie',
         'res.headers["set-cookie"]',
         'res.body',
+        'req.headers["x-cwi-report-token"]',
+        'req.headers["x-forwarded-for"]',
+        'req.headers["x-real-ip"]',
+        'req.headers["cf-connecting-ip"]',
+        'req.remoteAddress',
+        'req.remotePort',
       ],
     },
-  })
+    // Errors are logged under both `err` and `error`; without a serializer an Error object prints
+    // as {} and the message and stack are lost.
+    serializers: {
+      err: pino.stdSerializers.err,
+      error: pino.stdSerializers.err,
+    },
+  }
+  return destination ? pino(options, destination) : pino(options)
 }

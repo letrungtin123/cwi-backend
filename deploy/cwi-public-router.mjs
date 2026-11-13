@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
-import { Readable } from 'node:stream'
+import { Readable, pipeline } from 'node:stream'
 
 const args = new Map()
 for (let i = 2; i < process.argv.length; i += 2) args.set(process.argv[i], process.argv[i + 1])
@@ -42,6 +42,26 @@ const hopByHopHeaders = new Set([
 ])
 
 const fetchRecomputedHeaders = new Set(['content-encoding', 'content-length', 'content-md5'])
+
+// Security headers for the landing page and dashboard files (the API sets its own via helmet).
+// frame-ancestors / X-Frame-Options stop other sites from framing the forms that collect personal
+// data. The CSP only restricts framing, plugins and <base>, so scripts, styles, fonts and the PDF
+// viewer keep working as before.
+const staticSecurityHeaders = {
+  'content-security-policy': "frame-ancestors 'self'; object-src 'none'; base-uri 'self'",
+  'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+  'strict-transport-security': 'max-age=31536000; includeSubDomains',
+  'x-frame-options': 'SAMEORIGIN',
+}
+
+// Stream a file; if reading fails half-way (e.g. a deploy replaced it) end this response instead
+// of crashing the router with an unhandled stream error.
+function sendFile(res, filePath, range) {
+  pipeline(createReadStream(filePath, range), res, (error) => {
+    if (error && !res.destroyed) res.destroy(error)
+  })
+}
 
 function sendError(res, statusCode, message) {
   res.writeHead(statusCode, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
@@ -133,6 +153,9 @@ async function serveApp(req, res, root, strippedPath) {
     if (fileStat.isDirectory()) filePath = path.join(filePath, 'index.html')
     fileStat = await stat(filePath)
   } catch {
+    // A missing hashed asset (an old tab after a deploy) must be a 404, not index.html served as
+    // JavaScript/CSS with status 200.
+    if (decodedPath.startsWith('/assets/')) return sendError(res, 404, 'Not Found')
     filePath = path.join(root, 'index.html')
     fileStat = await stat(filePath)
   }
@@ -140,6 +163,7 @@ async function serveApp(req, res, root, strippedPath) {
   const ext = path.extname(filePath).toLowerCase()
   const isAsset = filePath.includes(`${path.sep}assets${path.sep}`)
   const headers = {
+    ...staticSecurityHeaders,
     'accept-ranges': 'bytes',
     'cache-control': isAsset ? 'public, max-age=31536000, immutable' : 'no-cache',
     'content-type': mimeTypes.get(ext) ?? 'application/octet-stream',
@@ -159,13 +183,13 @@ async function serveApp(req, res, root, strippedPath) {
       'content-length': String(contentLength),
       'content-range': `bytes ${byteRange.start}-${byteRange.end}/${fileStat.size}`,
     })
-    if (req.method !== 'HEAD') createReadStream(filePath, byteRange).pipe(res)
+    if (req.method !== 'HEAD') sendFile(res, filePath, byteRange)
     else res.end()
     return
   }
 
   res.writeHead(200, { ...headers, 'content-length': String(fileStat.size) })
-  if (req.method !== 'HEAD') createReadStream(filePath).pipe(res)
+  if (req.method !== 'HEAD') sendFile(res, filePath)
   else res.end()
 }
 

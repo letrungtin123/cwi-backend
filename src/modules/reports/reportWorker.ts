@@ -90,6 +90,7 @@ export class ReportWorker {
   private isRunning = false
   private isStopping = false
   private timer: NodeJS.Timeout | null = null
+  private currentTick: Promise<void> | null = null
 
   constructor(private readonly dependencies: ReportWorkerDependencies) {}
 
@@ -99,16 +100,21 @@ export class ReportWorker {
     this.schedule(0)
   }
 
-  stop() {
+  // Stops scheduling new work. The returned promise resolves once the job being processed right
+  // now (if any) has finished, so the caller can close the database pool after it.
+  stop(): Promise<void> {
     this.isStopping = true
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
+    return this.currentTick ?? Promise.resolve()
   }
 
   private schedule(delayMs: number) {
     if (this.isStopping) return
     this.timer = setTimeout(() => {
-      void this.tick()
+      this.currentTick = this.tick().finally(() => {
+        this.currentTick = null
+      })
     }, delayMs)
   }
 

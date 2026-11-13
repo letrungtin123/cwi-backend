@@ -593,7 +593,8 @@ function toNumber(value: string | null) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function appendLatestReportStatusFilter(where: string[], params: unknown[], reportStatus: ReportStatusFilter | null) {
+// Shared with the Excel export so an export contains exactly the rows the table shows.
+export function appendLatestReportStatusFilter(where: string[], params: unknown[], reportStatus: ReportStatusFilter | null) {
   if (reportStatus === null) return
 
   params.push(reportStatus)
@@ -608,6 +609,16 @@ function appendLatestReportStatusFilter(where: string[], params: unknown[], repo
     ORDER BY latest_report.created_at DESC, latest_report.id DESC
     LIMIT 1
   ), 'not_started') = $${params.length}`)
+}
+
+// Submissions with at least one result e-mail that failed. Shared with the Excel export.
+export function appendFailedEmailFilter(where: string[]) {
+  where.push(`EXISTS (
+    SELECT 1
+    FROM public.cwi_report_email_jobs AS email_job
+    WHERE email_job.submission_id = s.id
+      AND email_job.status = 'failed'
+  )`)
 }
 
 function appendSourceFilter(where: string[], params: unknown[], sourceId: SubmissionSourceFilter | null | undefined) {
@@ -669,14 +680,7 @@ function appendSubmissionDetailFilters(
     )
   }
 
-  if (filters.emailStatus === 'failed') {
-    where.push(`EXISTS (
-      SELECT 1
-      FROM public.cwi_report_email_jobs AS email_job
-      WHERE email_job.submission_id = s.id
-        AND email_job.status = 'failed'
-    )`)
-  }
+  if (filters.emailStatus === 'failed') appendFailedEmailFilter(where)
 }
 
 export class PgAdminRepository {
@@ -972,14 +976,7 @@ export class PgAdminRepository {
       )
     }
 
-    if (filters.emailStatus === 'failed') {
-      where.push(`EXISTS (
-        SELECT 1
-        FROM public.cwi_report_email_jobs AS email_job
-        WHERE email_job.submission_id = s.id
-          AND email_job.status = 'failed'
-      )`)
-    }
+    if (filters.emailStatus === 'failed') appendFailedEmailFilter(where)
 
     if (filters.search) {
       params.push('%' + filters.search + '%')
