@@ -129,10 +129,13 @@ wait_for_url() {
   return 1
 }
 
+# The smoke processes run in a background subshell. `exec` makes node replace that subshell, so
+# "$!" is node itself and stop_smoke_processes really stops it. Without it only the subshell was
+# killed and node kept running on the staging ports after every install.
 start_smoke_backend() {
   (
     cd "$release_dir/cwi-backend"
-    NODE_ENV=production CWI_ENV_FILE="$env_file" DOTENV_CONFIG_PATH="$env_file" CWI_PLATFORM_ROOT="$release_dir" \
+    exec env NODE_ENV=production CWI_ENV_FILE="$env_file" DOTENV_CONFIG_PATH="$env_file" CWI_PLATFORM_ROOT="$release_dir" \
       HOST=127.0.0.1 PORT="$staged_backend_port" node deploy/start-backend.mjs \
       >"$release_root/.artifact-backend-smoke.log" 2>&1
   ) &
@@ -142,7 +145,7 @@ start_smoke_backend() {
 start_smoke_public() {
   (
     cd "$release_dir/cwi-backend"
-    NODE_ENV=production CWI_PLATFORM_ROOT="$release_dir" \
+    exec env NODE_ENV=production CWI_PLATFORM_ROOT="$release_dir" \
       node deploy/cwi-public-router.mjs \
       --landing-root "$release_dir/source4/dist" \
       --dashboard-root "$release_dir/cwi-dashboard/dist" \
