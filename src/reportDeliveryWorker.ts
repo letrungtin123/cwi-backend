@@ -11,6 +11,7 @@ import { createDbPool } from './db/pool.js'
 import { createLogger } from './logger.js'
 import { PgReportDeliveryRepository } from './modules/reportDelivery/reportDeliveryRepository.js'
 import { SmtpDeliveryError, SmtpReportMailer } from './modules/reportDelivery/smtpMailer.js'
+import { waitForMailServer } from './modules/reportDelivery/waitForMailServer.js'
 import { ReportAssetStorage } from './modules/reports/reportAssetStorage.js'
 import { installProcessGuards, logIdlePoolError } from './processGuards.js'
 import { uuidPattern } from './http/ids.js'
@@ -231,7 +232,12 @@ async function run() {
     user: env.mailSmtpUser,
     socketTimeoutMs: env.mailSmtpSocketTimeoutMs,
   })
-  await mailer.verify()
+  // A mail server that is briefly unreachable must not crash the worker (see waitForMailServer).
+  if (!(await waitForMailServer(() => mailer.verify(), { isStopping: () => stopping, logger, sleep }))) {
+    mailer.close()
+    await pool.end().catch(() => undefined)
+    return
+  }
   const connection = await amqp.connect(env.rabbitmqUrl)
   const channel = await connection.createConfirmChannel()
   const dispatchConsumer = await connection.createChannel()
