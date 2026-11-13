@@ -199,6 +199,7 @@ Các tài khoản sau đó được tạo ngay trong dashboard.
     - file env của backend.
   - Tất cả được mã hoá bằng GPG AES-256, dùng mật khẩu trong `~/.config/cwi/backup-passphrase`.
   - Server giữ 14 ngày trong `~/cwi-backups/auto`. Mỗi tuần script tự khôi phục thử bản mới nhất vào một database tạm.
+  - File đã bị xoá khỏi Storage: bản sao được chuyển sang `storage-deleted/<ngày>/` và xoá hẳn sau 90 ngày. Nếu hơn 20% số file biến mất cùng lúc, script không dọn gì và ghi cảnh báo (chốt an toàn). Máy kéo backup về làm y như vậy.
 - **Kéo backup về máy khác.** `cwi-backup-pull.ps1` chạy trên máy Windows bằng Task Scheduler.
   - Script kéo backup về `D:\CWI-Backups` và giữ 90 ngày.
   - Có vấn đề thì hiện thông báo Windows.

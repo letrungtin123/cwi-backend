@@ -3,6 +3,7 @@
 #
 #   D:\CWI-Backups\db\<UTC time>\      encrypted database dumps (kept 90 days here)
 #   D:\CWI-Backups\storage\...\*.gpg   encrypted copy of every Storage file (PDFs), only new files are downloaded
+#   D:\CWI-Backups\storage-deleted\<date>\   copies of files deleted on the platform, removed after 90 days
 #   D:\CWI-Backups\logs\               one log per day
 #   D:\CWI-Backups\TRANG-THAI.txt      result of the last run, in plain words
 # Problems (pull failed, server backup failed or older than 2 days, restore test failed) also
@@ -97,6 +98,36 @@ try {
     Remove-Item $tarFile, "$tarFile.err", $listFile -Force -ErrorAction SilentlyContinue
   }
   $summary.Add("File PDF (Storage): tai them $($missing.Count), tong cong $($remoteFiles.Count) file tren server")
+  if ($latest.warning) { $problems.Add("Server canh bao: $($latest.warning)") }
+
+  # 3b. Copies of files deleted on the platform (no longer on the server list) move to
+  # storage-deleted\<date>\ and are removed after $KeepDays days. Safety stop: if more than 20 %
+  # would move at once, move nothing and warn (a broken listing must never empty the copy).
+  $storageRoot = "$Root\storage"
+  $localFiles = @(Get-ChildItem -LiteralPath $storageRoot -Recurse -File -Filter '*.gpg' | ForEach-Object { $_.FullName.Substring($storageRoot.Length + 1) -replace '\\', '/' })
+  $gone = @($localFiles | Where-Object { -not $remoteFiles.ContainsKey($_) })
+  if ($gone.Count) {
+    if ($remoteFiles.Count -eq 0 -or ($gone.Count * 5) -gt $localFiles.Count) {
+      $problems.Add("$($gone.Count)/$($localFiles.Count) file PDF tren may khong con tren server; KHONG don (chot an toan), can kiem tra")
+    } else {
+      $today = Get-Date -Format 'yyyy-MM-dd'
+      foreach ($rel in $gone) {
+        $from = Join-Path $storageRoot ($rel -replace '/', '\')
+        $to = Join-Path "$Root\storage-deleted\$today" ($rel -replace '/', '\')
+        New-Item -ItemType Directory -Force -Path (Split-Path $to) | Out-Null
+        Move-Item -LiteralPath $from -Destination $to -Force
+      }
+      Get-ChildItem -LiteralPath $storageRoot -Recurse -Directory | Sort-Object { $_.FullName.Length } -Descending | Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force) } | Remove-Item -Force
+      $summary.Add("File PDF da bi xoa tren he thong: chuyen $($gone.Count) file sang storage-deleted\$today (giu $KeepDays ngay)")
+    }
+  }
+  if (Test-Path "$Root\storage-deleted") {
+    $deletedCutoff = (Get-Date).AddDays(-$KeepDays).ToString('yyyy-MM-dd')
+    Get-ChildItem "$Root\storage-deleted" -Directory | Where-Object { $_.Name -match '^\d{4}-\d{2}-\d{2}$' -and $_.Name -lt $deletedCutoff } | ForEach-Object {
+      Remove-Item -Recurse -Force $_.FullName
+      $summary.Add("Da xoa han storage-deleted\$($_.Name) (qua $KeepDays ngay)")
+    }
+  }
 
   # 4. Keep $KeepDays days of database copies on this PC (only folders named like a backup).
   $cutoff = (Get-Date).AddDays(-$KeepDays)

@@ -7,6 +7,7 @@
 #   db/<UTC time>/backend-env-<time>.env.gpg the backend env file (secrets needed to rebuild)
 #   db/<UTC time>/counts.txt                 row counts at dump time (plain, no personal data)
 #   storage/<path>.gpg                       each Supabase Storage file (PDFs), encrypted once
+#   storage-deleted/<date>/<path>.gpg        copies of files deleted on the platform, kept 90 days
 #   LATEST.json                              status the pull script on the office PC reads
 # Once a week the newest dump is decrypted and restored into a throw-away database to prove it
 # works; counts must match. Nothing outside /home/ubuntu/cwi-backups/auto is written, and the
@@ -32,7 +33,7 @@ status() { # ok message
   local restore='null'
   [ -f "$BASE/restore-check.json" ] && restore=$(cat "$BASE/restore-check.json")
   cat >"$BASE/LATEST.json" <<EOF
-{"time":"$(date -u +%FT%TZ)","ok":$1,"message":"$2","dir":"db/$TS","dbBytes":${DB_BYTES:-0},"storageFiles":${STORAGE_FILES:-0},"storageNew":${STORAGE_NEW:-0},"restoreCheck":$restore}
+{"time":"$(date -u +%FT%TZ)","ok":$1,"message":"$2","warning":"${WARNING:-}","dir":"db/$TS","dbBytes":${DB_BYTES:-0},"storageFiles":${STORAGE_FILES:-0},"storageNew":${STORAGE_NEW:-0},"storageGone":${STORAGE_GONE:-0},"restoreCheck":$restore}
 EOF
   chown -R "$OWNER:$OWNER" "$BASE"
 }
@@ -78,6 +79,40 @@ while IFS= read -r -d '' file; do
   fi
 done < <(find "$VOL" -type f -print0)
 echo "storage: $STORAGE_FILES files, $STORAGE_NEW newly encrypted"
+
+# 2b. Files no longer in Storage (deleted on the platform): their encrypted copy moves to
+# storage-deleted/<date found>/ and is removed 90 days later. Safety stop: if more than 20 % of
+# the copies would move at once (e.g. the volume is not readable), move nothing and warn.
+DELETED_KEEP_DAYS=90
+TODAY=$(date -u +%Y-%m-%d)
+WARNING=""
+STORAGE_GONE=0
+gone=()
+copies=0
+while IFS= read -r -d '' copy; do
+  copies=$((copies + 1))
+  rel=${copy#"$BASE/storage/"}
+  [ -e "$VOL/${rel%.gpg}" ] || gone+=("$rel")
+done < <(find "$BASE/storage" -type f -name '*.gpg' -print0)
+if [ "${#gone[@]}" -gt 0 ]; then
+  if [ "$STORAGE_FILES" -eq 0 ] || [ $(( ${#gone[@]} * 5 )) -gt "$copies" ]; then
+    WARNING="${#gone[@]} of $copies Storage copies have no source file; nothing moved (safety stop)"
+    echo "WARNING: $WARNING"
+  else
+    for rel in "${gone[@]}"; do
+      mkdir -p "$(dirname "$BASE/storage-deleted/$TODAY/$rel")"
+      mv "$BASE/storage/$rel" "$BASE/storage-deleted/$TODAY/$rel"
+    done
+    STORAGE_GONE=${#gone[@]}
+    find "$BASE/storage" -mindepth 1 -type d -empty -delete
+    echo "storage: $STORAGE_GONE copies of deleted files moved to storage-deleted/$TODAY"
+  fi
+fi
+cutoff=$(date -u -d "$TODAY - $DELETED_KEEP_DAYS days" +%Y-%m-%d)
+for dir in "$BASE"/storage-deleted/????-??-??; do
+  [ -d "$dir" ] || continue
+  if [[ "$(basename "$dir")" < "$cutoff" ]]; then rm -rf "$dir"; echo "removed $(basename "$dir") from storage-deleted (over $DELETED_KEEP_DAYS days)"; fi
+done
 
 # 3. Retention on the server (the office PC keeps a longer history).
 find "$BASE/db" -mindepth 1 -maxdepth 1 -type d -mtime +"$KEEP_DAYS" -exec rm -rf {} +
