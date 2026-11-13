@@ -1,0 +1,11 @@
+[Unit]
+Description=CWI daily encrypted backup (database, Storage files, backend env)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/ubuntu/cwi-platform/ops/cwi-backup.sh
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2h

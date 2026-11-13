@@ -190,6 +190,24 @@ Tạo tài khoản quản trị đầu tiên:
 
 Các tài khoản sau đó được tạo ngay trong dashboard.
 
+## Backup và khoá Supabase (`deploy/ops/`)
+
+- **Backup hằng ngày.** `cwi-backup.sh` chạy lúc 02:00 giờ Việt Nam bằng `cwi-backup.service` và `cwi-backup.timer` (systemd, cài ở `/etc/systemd/system`).
+  - Mỗi lần chạy tạo:
+    - bản dump đầy đủ của database;
+    - bản sao từng file trong Storage;
+    - file env của backend.
+  - Tất cả được mã hoá bằng GPG AES-256, dùng mật khẩu trong `~/.config/cwi/backup-passphrase`.
+  - Server giữ 14 ngày trong `~/cwi-backups/auto`. Mỗi tuần script tự khôi phục thử bản mới nhất vào một database tạm.
+- **Kéo backup về máy khác.** `cwi-backup-pull.ps1` chạy trên máy Windows bằng Task Scheduler.
+  - Script kéo backup về `D:\CWI-Backups` và giữ 90 ngày.
+  - Có vấn đề thì hiện thông báo Windows.
+- **Đổi khoá Supabase.** `rotate-supabase-secrets.mjs` đổi khoá JWT, khoá anon/service_role và mật khẩu mọi tài khoản database. Script cũng tạo tài khoản `cwi_app` với quyền tối thiểu cho backend.
+  - Các bước: `plan` → `app-role` → `backend-env --only db` → `rotate` → `backend-env` → `verify`. Có `rollback` để quay lại.
+  - Kong do bên khác quản lý nên script không sửa Kong.
+  - Container mới giữ đúng IP của container cũ, vì Kong nhớ IP của các dịch vụ phía sau.
+  - Lưu ý: chạy lại Supabase CLI (`supabase start`) trên server sẽ đưa mọi khoá về giá trị mặc định. Không làm việc này.
+
 ## Triển khai
 
 Production chạy bản build đóng gói sẵn, không chạy từ mã nguồn, và PM2 quản lý các tiến trình. Xem `DEPLOYMENT_ARTIFACT.md` và `deploy/README.md`.
