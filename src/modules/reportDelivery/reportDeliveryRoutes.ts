@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { Readable } from 'node:stream'
 import { Router, type Request } from 'express'
 import type { RuntimeConfig } from '../../config/runtime.js'
 import { createAdminRequestRateLimit, getRequiredAdminSession, requireAdminSession } from '../../http/adminSession.js'
@@ -10,6 +9,7 @@ import { MultipartUploadError, parsePdfUpload, removeParsedPdfUpload } from './r
 import { PgReportDeliveryRepository, ReportDeliveryRepositoryError } from './reportDeliveryRepository.js'
 import type { SmtpReportMailer } from './smtpMailer.js'
 import { contentDispositionAttachment } from './reportDeliveryFilename.js'
+import { streamToResponse } from '../../http/streamResponse.js'
 import { canManageContent } from '../auth/adminRoles.js'
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -131,7 +131,7 @@ export function createReportDeliveryRouter(
       res.setHeader('Content-Disposition', contentDispositionAttachment(file.originalFileName))
       res.setHeader('X-Content-Type-Options', 'nosniff')
       if (download.contentLength) res.setHeader('Content-Length', download.contentLength)
-      Readable.fromWeb(download.body as globalThis.ReadableStream<Uint8Array>).pipe(res)
+      await streamToResponse(download.body as globalThis.ReadableStream<Uint8Array>, res)
     } catch (error) { next(mapRepositoryError(error)) }
   })
 

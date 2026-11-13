@@ -1,5 +1,6 @@
 import type pg from 'pg'
 import { randomUUID } from 'node:crypto'
+import { appendFailedEmailFilter, appendLatestReportStatusFilter } from '../admin/adminRepository.js'
 import type { ExportDataset, ExportFilters, ExportJob, ExportJobRow, ClaimedExportJob } from './exportTypes.js'
 
 type SubmissionExportRow = {
@@ -253,6 +254,8 @@ export class PgExportRepository {
       params.push('%' + filters.search + '%')
       where.push('(s.full_name ILIKE $' + params.length + ' OR s.email ILIKE $' + params.length + ' OR s.phone ILIKE $' + params.length + ' OR s.position ILIKE $' + params.length + ')')
     }
+    appendLatestReportStatusFilter(where, params, filters.reportStatus ?? null)
+    if (filters.emailStatus === 'failed') appendFailedEmailFilter(where)
     params.push(batchSize + 1)
     const result = await this.pool.query<SubmissionExportRow>(
       [

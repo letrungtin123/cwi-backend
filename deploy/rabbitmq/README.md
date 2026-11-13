@@ -54,7 +54,7 @@ docker compose --env-file .env -p cwi-rabbitmq-production ps
 Access the production Management UI through an SSH tunnel:
 
 ```powershell
-ssh -L 15672:127.0.0.1:15672 ubuntu@18.139.252.111
+ssh -L 15672:127.0.0.1:15672 ubuntu@<server-ip>
 ```
 
 Then open http://127.0.0.1:15672 locally.

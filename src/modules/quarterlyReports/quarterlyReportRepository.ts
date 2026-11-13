@@ -142,6 +142,13 @@ const reportSelect = `
   FROM public.cwi_quarterly_reports
 `
 
+// Public links work once a quarter has been released: the report shown on the landing page, or an
+// older quarter. A report saved "to history" for a quarter NEWER than the shown one (prepared ahead
+// of release) stays private, even though its slug (e.g. q1-2027) is easy to guess.
+const releasedCondition = `(is_active OR (period_year, period_quarter) < (
+    SELECT active.period_year, active.period_quarter FROM public.cwi_quarterly_reports AS active WHERE active.is_active LIMIT 1
+  ))`
+
 export class PgQuarterlyReportRepository {
   constructor(
     private readonly pool: pg.Pool,
@@ -154,12 +161,12 @@ export class PgQuarterlyReportRepository {
   }
 
   async getPublicBySlug(slug: string) {
-    const result = await this.pool.query<ReportRow>(`${reportSelect} WHERE slug = $1 LIMIT 1`, [slug])
+    const result = await this.pool.query<ReportRow>(`${reportSelect} WHERE slug = $1 AND ${releasedCondition} LIMIT 1`, [slug])
     return result.rows[0] ? mapPublic(result.rows[0]) : null
   }
 
   async getFileBySlug(slug: string): Promise<(QuarterlyReportPublic & QuarterlyReportFile) | null> {
-    const result = await this.pool.query<ReportRow>(`${reportSelect} WHERE slug = $1 LIMIT 1`, [slug])
+    const result = await this.pool.query<ReportRow>(`${reportSelect} WHERE slug = $1 AND ${releasedCondition} LIMIT 1`, [slug])
     const row = result.rows[0]
     if (!row) return null
     return { ...mapPublic(row), fileName: row.original_file_name, storagePath: row.storage_path }

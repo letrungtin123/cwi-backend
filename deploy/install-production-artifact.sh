@@ -13,7 +13,7 @@ staged_backend_port="${CWI_STAGED_BACKEND_PORT:-18088}"
 staged_public_port="${CWI_STAGED_PUBLIC_PORT:-18080}"
 public_origin="${CWI_PUBLIC_ORIGIN:-https://ceo-workforce-index.com}"
 prune_legacy_source='false'
-prune_artifacts='3'
+prune_artifacts='5'
 backend_pid=''
 public_pid=''
 rollout_started='false'
@@ -29,7 +29,7 @@ Options:
   --env-file PATH                 External backend env file, default: $HOME/.config/cwi/cwi-backend.env
   --release-id ID                 Release id; defaults to marker value
   --prune-legacy-source           Remove the three legacy Git checkouts after success
-  --prune-artifacts COUNT         Keep this many artifact releases, default: 3
+  --prune-artifacts COUNT         Keep this many artifact releases, default: 5
 EOF
 }
 
@@ -203,9 +203,13 @@ rm -f "$release_root/.artifact-backend-smoke.log" "$release_root/.artifact-publi
 rm -f "$artifact"
 
 if [[ "$prune_artifacts" -gt 0 ]]; then
-  mapfile -t old_artifacts < <(find "$release_root" -mindepth 1 -maxdepth 1 -type f -name '.artifact-release' -printf '%h\n' | sort -r | tail -n +$((prune_artifacts + 1)))
+  # The marker sits inside each release folder (<release_root>/<id>/.artifact-release), so look one
+  # level down. Release ids are timestamps: newest first, keep the first N, never the live release.
+  live_release="$(readlink -f "$current_link")"
+  mapfile -t old_artifacts < <(find "$release_root" -mindepth 2 -maxdepth 2 -type f -name '.artifact-release' -printf '%h\n' | sort -r | tail -n +$((prune_artifacts + 1)))
   for old_release in "${old_artifacts[@]:-}"; do
-    [[ -n "$old_release" ]] && rm -rf "$old_release"
+    [[ -n "$old_release" && "$old_release" != "$release_dir" && "$old_release" != "$live_release" ]] || continue
+    [[ "$old_release" == "$release_root"/* ]] && rm -rf "$old_release"
   done
 fi
 

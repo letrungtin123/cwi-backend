@@ -4,8 +4,11 @@ export const exportDatasetSchema = z.enum(['submissions', 'roundtable', 'webinar
 
 export const exportFiltersSchema = z
   .object({
+    // Only results e-mails that failed can be filtered (same as the submissions table).
+    emailStatus: z.literal('failed').optional(),
     linkStatus: z.enum(['linked', 'standalone']).optional(),
     quarter: z.string().regex(/^[0-9]{4}Q[1-4]$/).optional(),
+    reportStatus: z.enum(['not_started', 'generating', 'completed', 'failed', 'skipped']).optional(),
     roundtableRegistered: z.boolean().optional(),
     search: z.string().trim().max(120).optional(),
     // A survey source id, or 'none' for submissions that came without a source link.

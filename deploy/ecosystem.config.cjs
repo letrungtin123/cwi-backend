@@ -29,6 +29,8 @@ module.exports = {
       max_memory_restart: '512M',
       exp_backoff_restart_delay: 100,
       max_restarts: 10,
+      // Time to finish in-flight requests/jobs after SIGTERM before PM2 kills the process.
+      kill_timeout: 30000,
     },
     {
       name: 'cwi-export-worker',
@@ -41,6 +43,8 @@ module.exports = {
       max_memory_restart: '768M',
       exp_backoff_restart_delay: 100,
       max_restarts: 10,
+      // Time to finish in-flight requests/jobs after SIGTERM before PM2 kills the process.
+      kill_timeout: 30000,
     },
     {
       name: 'cwi-report-delivery-worker',
@@ -53,6 +57,8 @@ module.exports = {
       max_memory_restart: '512M',
       exp_backoff_restart_delay: 100,
       max_restarts: 10,
+      // Time to finish in-flight requests/jobs after SIGTERM before PM2 kills the process.
+      kill_timeout: 30000,
     },
     {
       name: 'cwi-public',
@@ -69,6 +75,8 @@ module.exports = {
       max_memory_restart: '256M',
       exp_backoff_restart_delay: 100,
       max_restarts: 10,
+      // Time to finish in-flight requests/jobs after SIGTERM before PM2 kills the process.
+      kill_timeout: 30000,
     },
     {
       name: 'cwi-report-generation-worker',
@@ -81,6 +89,8 @@ module.exports = {
       max_memory_restart: '768M',
       exp_backoff_restart_delay: 100,
       max_restarts: 10,
+      // Time to finish in-flight requests/jobs after SIGTERM before PM2 kills the process.
+      kill_timeout: 30000,
     },
   ],
 }
