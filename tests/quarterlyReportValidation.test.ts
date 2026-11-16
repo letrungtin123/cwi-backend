@@ -6,14 +6,14 @@ import { normalizeQuarterlyReportDownload, normalizeQuarterlyReportUpload, quart
 describe('quarterly report validation', () => {
   it('normalizes a valid gated-download lead and Vietnamese mobile number', () => {
     const value = normalizeQuarterlyReportDownload({
-      clientMeta: { app: 'source4' },
+      clientMeta: { app: 'cwi-fe-landing-page' },
       email: '  Hq@Example.com ',
       fullName: '  Nguyen   Van   An ',
-      idempotencyKey: 'source4-quarterly-report:test-1234',
+      idempotencyKey: 'cwi-fe-landing-page-quarterly-report:test-1234',
       phone: '090 123 4567',
       position: 'CEO',
       privacyConsent: true,
-    }, 'source4-quarterly-report:test-1234')
+    }, 'cwi-fe-landing-page-quarterly-report:test-1234')
 
     expect(value).toMatchObject({
       email: 'hq@example.com',
@@ -36,11 +36,11 @@ describe('quarterly report validation', () => {
     expect(() => normalizeQuarterlyReportDownload({
       email: 'lead@company.com',
       fullName: 'Lead',
-      idempotencyKey: 'source4-quarterly-report:body-1234',
+      idempotencyKey: 'cwi-fe-landing-page-quarterly-report:body-1234',
       phone: '0901234567',
       position: 'CEO',
       privacyConsent: true,
-    }, 'source4-quarterly-report:header-1234')).toThrow(HttpError)
+    }, 'cwi-fe-landing-page-quarterly-report:header-1234')).toThrow(HttpError)
   })
 
   it('uses a predictable period slug and defaults for an upload', () => {

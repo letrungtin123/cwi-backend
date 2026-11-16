@@ -1,7 +1,7 @@
 // English text of the current question set (SURVEY_VERSION), keyed by the stored Vietnamese text.
 // Answers are always stored in Vietnamese; this is only for showing a survey taken in English
 // in English again (dashboard detail). Copied from the landing dictionary
-// (source4 src/i18n/en/questions.ts): change both together. A test checks every question and
+// (cwi-fe-landing-page src/i18n/en/questions.ts): change both together. A test checks every question and
 // option has an entry.
 export const SURVEY_TEXT_EN: Readonly<Record<string, string>> = {
   "Chúng tôi có đủ năng lực để thích ứng nhanh trước thay đổi của thị trường.": "We have the capability to adapt quickly to market changes.",

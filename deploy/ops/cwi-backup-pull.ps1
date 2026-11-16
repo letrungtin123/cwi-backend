@@ -10,7 +10,8 @@
 # show a Windows notification.
 param(
   [string]$Root = 'D:\CWI-Backups',
-  [string]$Server = 'ubuntu@18.139.252.111',
+  # SSH target of the production server, e.g. ubuntu@<server-ip>.
+  [Parameter(Mandatory = $true)][string]$Server,
   [string]$RemoteBase = '/home/ubuntu/cwi-backups/auto',
   [int]$KeepDays = 90
 )

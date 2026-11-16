@@ -1,80 +1,28 @@
-# Triển khai production bằng artifact
+# Triển khai
 
-## Mục tiêu
+Production chạy bản build đóng gói sẵn của ba ứng dụng (`cwi-backend`, `cwi-fe-landing-page`, `cwi-fe-dashboard`), quản lý bằng PM2. Server không giữ mã nguồn và không build.
 
-Production nhận một gói build đã được kiểm tra từ máy phát triển hoặc CI. Máy chủ chỉ giữ bản build, runtime launcher, thư viện production và file cấu hình bí mật bên ngoài release; không cần `git`, `.git`, `src`, test hoặc raw source của ba ứng dụng.
+1. **Đóng gói** (máy phát triển, ba repo nằm cạnh nhau, sạch và đã đồng bộ `main`):
 
-Quy trình này chỉ triển khai `source4`, `cwi-dashboard` và `cwi-backend`. Không chạy migration, không reset cơ sở dữ liệu, không xoá dữ liệu Supabase/Storage/RabbitMQ và không đọc, sửa hoặc triển khai `cwi-ai`.
+   ```powershell
+   .\deploy\build-production-artifact.ps1
+   ```
 
-## Tạo và cài release
+   Script chạy typecheck, lint, test của cả ba repo rồi mới build, và tạo `.artifacts/cwi-release-<id>.tar.gz`. `-SkipChecks` chỉ dùng khi khẩn cấp.
+2. **Cài đặt** trên server: chép gói và `install-production-artifact.sh` lên, rồi chạy
 
-Thực hiện ở máy phát triển, tại thư mục `cwi-backend`:
+   ```bash
+   bash install-production-artifact.sh --artifact <file .tar.gz> --release-id <id>
+   ```
 
-```powershell
-Set-Location D:\CWI\cwi-backend
-.\deploy\publish-production-artifact.ps1 `
-  -RemoteHost "SERVER_HOST" `
-  -RemoteUser "ubuntu" `
-  -SshKeyPath "C:\path\to\ssh-key"
-```
+   Script chạy thử bản mới trên cổng staging, chuyển PM2 sang khi kiểm tra đạt, và tự quay về bản cũ nếu lỗi. Giữ 5 bản gần nhất.
 
-Script dùng lockfile để cài dependency, yêu cầu cả ba repository sạch, đang ở `main` và đã đồng bộ với `origin/main`, rồi chạy build, tạo manifest commit và checksum SHA-256, sau đó gửi một artifact qua SSH. Máy chủ không chạy `git pull` và không build raw source.
+Secret nằm ngoài gói, trong file do `CWI_ENV_FILE` chỉ tới. Quy trình không chạy SQL migration và không xoá dữ liệu.
 
-Builder luôn ghi đè URL API frontend thành `/api` trong lúc build production để không đưa `localhost` từ `.env phát triển` vào bundle. Chỉ dùng `-FrontendApiBaseUrl` cho mô hình tách host đã được kiểm tra CORS và HTTPS.
+Các file khác:
 
-Chỉ tạo gói để kiểm tra local:
-
-```powershell
-.\deploy\build-production-artifact.ps1
-```
-
-Gói được tạo trong `.artifacts/`, thư mục này đã được Git ignore. Trước khi gửi, có thể kiểm tra gói không chứa raw source:
-
-```powershell
-tar -tzf .artifacts\cwi-release-*.tar.gz | Select-String '(^|/)(src|\.git|\.env)(/|$)'
-```
-
-## Cách release bảo vệ production
-
-Installer trên máy chủ sẽ:
-
-1. Từ chối đường dẫn nguy hiểm trong tar và kiểm tra checksum.
-2. Xác nhận đủ `dist`, launcher và metadata runtime.
-3. Cài dependency production trong thư mục release mới.
-4. Chạy backend và public router ở cổng staging, kiểm tra liveness, readiness, landing và dashboard.
-5. Chỉ sau khi kiểm tra đạt mới chuyển PM2 sang release mới.
-6. Giữ release cũ để rollback tự động nếu PM2 hoặc health check thất bại.
-7. Giữ ba release artifact gần nhất và xoá artifact upload tạm sau khi cài thành công.
-
-File môi trường production không nằm trong release. Mặc định file ở `~/.config/cwi/cwi-backend.env`, quyền `600`, và được nạp qua `CWI_ENV_FILE`/`DOTENV_CONFIG_PATH`. Không commit file này, SMTP password, Supabase key, RabbitMQ credential hoặc token AI.
-
-## Dọn source legacy
-
-Không bật dọn source ở lần rollout đầu tiên. Sau khi kiểm tra domain, PM2 và các luồng survey/report/email đã chạy ổn từ artifact, có thể chạy lại publish với `-PruneLegacySource`. Tùy chọn này chỉ xoá ba checkout legacy dưới `~/cwi-platform/repos/{source4,cwi-dashboard,cwi-backend}` sau khi release artifact đã active; không chạm `~/cwi-ai`.
-
-Script cũ `deploy/update-production.sh` đã bị khóa mặc định để tránh vô tình kéo và build source trên máy chủ. Không bật `CWI_ALLOW_LEGACY_SOURCE_DEPLOY=true` trong production.
-
-## Kiểm tra sau triển khai
-
-```bash
-pm2 status
-pm2 logs cwi-backend --lines 100
-curl --fail-with-body -sS http://127.0.0.1:8088/healthz
-curl --fail-with-body -sS http://127.0.0.1:8088/readyz
-curl --fail-with-body -sS http://127.0.0.1:8180/ > /dev/null
-curl --fail-with-body -sS http://127.0.0.1:8180/dashboard/ > /dev/null
-```
-
-## Public ingress
-
-`cwi-public` is private on `127.0.0.1:8180`. Production Nginx is the only
-public ingress and proxies to that port. The versioned Nginx and firewall files
-under `deploy/nginx/` must be installed by an administrator before changing
-Cloudflare's SSL mode to **Full (strict)**. Do not expose port `8180`, `8088`,
-or the Docker service ports to the Internet.
-
-When Certbot is used with the webroot authenticator, install
-`certbot-reload-nginx.sh` as a Certbot deploy hook so Nginx reloads each renewed
-certificate automatically.
-
-Nếu có lỗi, xem `pm2 status` và log PM2 trước khi retry. Không xoá release đang active hoặc dữ liệu ứng dụng thủ công.
+- `ecosystem.config.cjs`: cấu hình PM2
+- `cwi-public-router.mjs`: phục vụ landing, `/dashboard/` và chuyển tiếp `/api`
+- `nginx/`: cấu hình nginx
+- `rabbitmq/`: RabbitMQ cho worker gửi email
+- `ops/`: backup tự động có mã hoá, đổi khoá Supabase

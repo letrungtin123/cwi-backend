@@ -25,7 +25,7 @@ export function getRequestMeta(req: Request, ipHashSecret: string): RequestMeta 
   return {
     clientIpHash,
     idempotencyKey: getIdempotencyKey(req),
-    source: limitText(req.get('x-cwi-source') ?? undefined, 80) ?? 'source4',
+    source: limitText(req.get('x-cwi-source') ?? undefined, 80) ?? 'cwi-fe-landing-page',
     userAgent: limitText(req.get('user-agent') ?? undefined, 512),
   }
 }

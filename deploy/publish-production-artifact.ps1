@@ -3,7 +3,7 @@ param(
   [string]$RemoteHost,
   [string]$RemoteUser = 'ubuntu',
   [string]$SshKeyPath = '',
-  [string]$Source4Path = '',
+  [string]$LandingPath = '',
   [string]$DashboardPath = '',
   [string]$FrontendApiBaseUrl = '/api',
   [string]$LandingBaseUrl = 'https://ceo-workforce-index.com',
@@ -27,7 +27,7 @@ if ($RemoteUser -notmatch '^[A-Za-z_][A-Za-z0-9_-]*$') { throw 'RemoteUser conta
 $backendPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $builder = Join-Path $PSScriptRoot 'build-production-artifact.ps1'
 $buildArgs = @('-File', $builder)
-if ($Source4Path) { $buildArgs += @('-Source4Path', $Source4Path) }
+if ($LandingPath) { $buildArgs += @('-LandingPath', $LandingPath) }
 if ($DashboardPath) { $buildArgs += @('-DashboardPath', $DashboardPath) }
 if ($FrontendApiBaseUrl) { $buildArgs += @('-FrontendApiBaseUrl', $FrontendApiBaseUrl) }
 if ($LandingBaseUrl) { $buildArgs += @('-LandingBaseUrl', $LandingBaseUrl) }

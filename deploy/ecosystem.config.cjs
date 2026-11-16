@@ -66,8 +66,8 @@ module.exports = {
       script: publicRouter,
       interpreter: nodePath,
       args:
-        '--landing-root ' + path.join(platformRoot, 'source4', 'dist') +
-        ' --dashboard-root ' + path.join(platformRoot, 'cwi-dashboard', 'dist') +
+        '--landing-root ' + path.join(platformRoot, 'cwi-fe-landing-page', 'dist') +
+        ' --dashboard-root ' + path.join(platformRoot, 'cwi-fe-dashboard', 'dist') +
         ' --port 8180 --host 127.0.0.1 --api http://127.0.0.1:8088',
       env: { NODE_ENV: nodeEnv },
       env_production: { NODE_ENV: 'production' },

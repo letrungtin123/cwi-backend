@@ -7,8 +7,8 @@ import { Readable, pipeline } from 'node:stream'
 const args = new Map()
 for (let i = 2; i < process.argv.length; i += 2) args.set(process.argv[i], process.argv[i + 1])
 
-const landingRoot = path.resolve(args.get('--landing-root') ?? 'source4/dist')
-const dashboardRoot = path.resolve(args.get('--dashboard-root') ?? 'cwi-dashboard/dist')
+const landingRoot = path.resolve(args.get('--landing-root') ?? 'cwi-fe-landing-page/dist')
+const dashboardRoot = path.resolve(args.get('--dashboard-root') ?? 'cwi-fe-dashboard/dist')
 const port = Number(args.get('--port') ?? 8080)
 const host = args.get('--host') ?? '0.0.0.0'
 const apiBaseUrl = (args.get('--api') ?? 'http://127.0.0.1:8088').replace(/\/+$/, '')

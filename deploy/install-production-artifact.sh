@@ -91,8 +91,8 @@ if find "$stage_dir" -path '*/node_modules' -prune -o -type d \( -name .git -o -
   fail 'Artifact contains raw source or Git metadata.'
 fi
 for required in \
-  "$stage_dir/source4/dist/index.html" \
-  "$stage_dir/cwi-dashboard/dist/index.html" \
+  "$stage_dir/cwi-fe-landing-page/dist/index.html" \
+  "$stage_dir/cwi-fe-dashboard/dist/index.html" \
   "$stage_dir/cwi-backend/dist/server.js" \
   "$stage_dir/cwi-backend/deploy/ecosystem.config.cjs" \
   "$stage_dir/cwi-backend/package-lock.json"; do
@@ -147,8 +147,8 @@ start_smoke_public() {
     cd "$release_dir/cwi-backend"
     exec env NODE_ENV=production CWI_PLATFORM_ROOT="$release_dir" \
       node deploy/cwi-public-router.mjs \
-      --landing-root "$release_dir/source4/dist" \
-      --dashboard-root "$release_dir/cwi-dashboard/dist" \
+      --landing-root "$release_dir/cwi-fe-landing-page/dist" \
+      --dashboard-root "$release_dir/cwi-fe-dashboard/dist" \
       --port "$staged_public_port" --host 127.0.0.1 \
       --api "http://127.0.0.1:${staged_backend_port}" \
       >"$release_root/.artifact-public-smoke.log" 2>&1
@@ -218,6 +218,7 @@ fi
 
 if [[ "$prune_legacy_source" == 'true' ]]; then
   [[ "$(readlink -f "$current_link")" != "${platform_root}/repos"/* ]] || fail 'Refusing to remove legacy source while current points to it.'
+  # Folder names of the old git-based deploy (before release artifacts) on the server.
   for app in source4 cwi-dashboard cwi-backend; do
     [[ -d "${platform_root}/repos/${app}" ]] && rm -rf "${platform_root}/repos/${app}"
   done

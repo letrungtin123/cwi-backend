@@ -347,7 +347,7 @@ describe('normalizeRoundtableRegistration', () => {
     fullName: '  Nguyễn   Văn An  ',
     phone: '090 123 4567',
     position: ' CEO / Tổng Giám đốc ',
-    surveySubmissionIdempotencyKey: 'source4:survey-key-1',
+    surveySubmissionIdempotencyKey: 'cwi-fe-landing-page:survey-key-1',
   }
 
   it('normalizes email-only status checks', () => {
@@ -364,7 +364,7 @@ describe('normalizeRoundtableRegistration', () => {
     expect(registration.quarter).toBe('2026Q4')
     expect(registration.idempotencyKey).toBe('roundtable-key-1')
     expect(registration.position).toBe('CEO / Tổng Giám đốc')
-    expect(registration.surveySubmissionIdempotencyKey).toBe('source4:survey-key-1')
+    expect(registration.surveySubmissionIdempotencyKey).toBe('cwi-fe-landing-page:survey-key-1')
     expect(registration.payloadHash).toMatch(/^[a-f0-9]{64}$/)
   })
 
@@ -438,7 +438,7 @@ describe('normalizeWebinarRegistration', () => {
       email: 'webinar@company.com',
       fullName: 'Nguyễn Văn An',
       position: 'CEO',
-      surveySubmissionIdempotencyKey: 'source4:survey-key-1',
+      surveySubmissionIdempotencyKey: 'cwi-fe-landing-page:survey-key-1',
     }, 'webinar-key-1')
 
     expect(registration.companyName).toBeNull()

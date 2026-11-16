@@ -1,5 +1,5 @@
 param(
-  [string]$Source4Path = '',
+  [string]$LandingPath = '',
   [string]$DashboardPath = '',
   [string]$OutputDirectory = '',
   [string]$ReleaseId = '',
@@ -78,14 +78,14 @@ function Assert-ProductionRepository([string]$RepositoryPath, [string]$Label) {
 
 $backendPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $workspacePath = (Resolve-Path -LiteralPath (Join-Path $backendPath '..')).Path
-if (-not $Source4Path) { $Source4Path = Join-Path $workspacePath 'source4' }
-if (-not $DashboardPath) { $DashboardPath = Join-Path $workspacePath 'cwi-dashboard' }
-$Source4Path = Resolve-RequiredPath $Source4Path 'source4 repository'
-$DashboardPath = Resolve-RequiredPath $DashboardPath 'cwi-dashboard repository'
+if (-not $LandingPath) { $LandingPath = Join-Path $workspacePath 'cwi-fe-landing-page' }
+if (-not $DashboardPath) { $DashboardPath = Join-Path $workspacePath 'cwi-fe-dashboard' }
+$LandingPath = Resolve-RequiredPath $LandingPath 'cwi-fe-landing-page'
+$DashboardPath = Resolve-RequiredPath $DashboardPath 'cwi-fe-dashboard'
 $backendPath = Resolve-RequiredPath $backendPath 'cwi-backend repository'
 
-Assert-ProductionRepository $Source4Path 'source4 repository'
-Assert-ProductionRepository $DashboardPath 'cwi-dashboard repository'
+Assert-ProductionRepository $LandingPath 'cwi-fe-landing-page'
+Assert-ProductionRepository $DashboardPath 'cwi-fe-dashboard'
 Assert-ProductionRepository $backendPath 'cwi-backend repository'
 
 if (-not $ReleaseId) { $ReleaseId = [DateTime]::UtcNow.ToString('yyyyMMddHHmmss') }
@@ -96,7 +96,7 @@ if (-not $OutputDirectory) { $OutputDirectory = Join-Path $backendPath '.artifac
 $OutputDirectory = (New-Item -ItemType Directory -Force -Path $OutputDirectory).FullName
 
 if (-not $SkipInstall) {
-  Invoke-Npm $Source4Path @('ci', '--no-audit', '--no-fund')
+  Invoke-Npm $LandingPath @('ci', '--no-audit', '--no-fund')
   Invoke-Npm $DashboardPath @('ci', '--no-audit', '--no-fund')
   Invoke-Npm $backendPath @('ci', '--no-audit', '--no-fund')
 }
@@ -111,23 +111,23 @@ if ($SkipChecks) {
   Invoke-Npm $backendPath @('test')
   Invoke-Npm $DashboardPath @('run', 'lint')
   Invoke-Npm $DashboardPath @('test')
-  Invoke-Npm $Source4Path @('run', 'lint')
-  Invoke-Npm $Source4Path @('test')
-  Invoke-Npm $Source4Path @('run', 'check:i18n')
+  Invoke-Npm $LandingPath @('run', 'lint')
+  Invoke-Npm $LandingPath @('test')
+  Invoke-Npm $LandingPath @('run', 'check:i18n')
 }
 
-$previousSource4ApiUrl = [Environment]::GetEnvironmentVariable('VITE_CWI_API_BASE_URL', 'Process')
+$previousLandingApiUrl = [Environment]::GetEnvironmentVariable('VITE_CWI_API_BASE_URL', 'Process')
 $previousDashboardApiUrl = [Environment]::GetEnvironmentVariable('VITE_API_BASE_URL', 'Process')
 $previousDashboardLandingUrl = [Environment]::GetEnvironmentVariable('VITE_LANDING_BASE_URL', 'Process')
 $env:VITE_CWI_API_BASE_URL = $FrontendApiBaseUrl
 $env:VITE_API_BASE_URL = $FrontendApiBaseUrl
 $env:VITE_LANDING_BASE_URL = $LandingBaseUrl.TrimEnd('/')
 try {
-  Invoke-Npm $Source4Path @('run', 'build')
+  Invoke-Npm $LandingPath @('run', 'build')
   Invoke-Npm $DashboardPath @('run', 'build')
   Invoke-Npm $backendPath @('run', 'build')
 } finally {
-  if ($null -eq $previousSource4ApiUrl) { Remove-Item Env:VITE_CWI_API_BASE_URL -ErrorAction SilentlyContinue } else { $env:VITE_CWI_API_BASE_URL = $previousSource4ApiUrl }
+  if ($null -eq $previousLandingApiUrl) { Remove-Item Env:VITE_CWI_API_BASE_URL -ErrorAction SilentlyContinue } else { $env:VITE_CWI_API_BASE_URL = $previousLandingApiUrl }
   if ($null -eq $previousDashboardApiUrl) { Remove-Item Env:VITE_API_BASE_URL -ErrorAction SilentlyContinue } else { $env:VITE_API_BASE_URL = $previousDashboardApiUrl }
   if ($null -eq $previousDashboardLandingUrl) { Remove-Item Env:VITE_LANDING_BASE_URL -ErrorAction SilentlyContinue } else { $env:VITE_LANDING_BASE_URL = $previousDashboardLandingUrl }
 }
@@ -137,12 +137,12 @@ $artifactPath = Join-Path $OutputDirectory "cwi-release-$ReleaseId.tar.gz"
 if (Test-Path -LiteralPath $stagePath) { Remove-Item -LiteralPath $stagePath -Recurse -Force }
 if (Test-Path -LiteralPath $artifactPath) { Remove-Item -LiteralPath $artifactPath -Force }
 
-New-Item -ItemType Directory -Force -Path (Join-Path $stagePath 'source4') | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $stagePath 'cwi-dashboard') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stagePath 'cwi-fe-landing-page') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stagePath 'cwi-fe-dashboard') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stagePath 'cwi-backend') | Out-Null
 
-Copy-Item -LiteralPath (Join-Path $Source4Path 'dist') -Destination (Join-Path $stagePath 'source4') -Recurse
-Copy-Item -LiteralPath (Join-Path $DashboardPath 'dist') -Destination (Join-Path $stagePath 'cwi-dashboard') -Recurse
+Copy-Item -LiteralPath (Join-Path $LandingPath 'dist') -Destination (Join-Path $stagePath 'cwi-fe-landing-page') -Recurse
+Copy-Item -LiteralPath (Join-Path $DashboardPath 'dist') -Destination (Join-Path $stagePath 'cwi-fe-dashboard') -Recurse
 Copy-Item -LiteralPath (Join-Path $backendPath 'dist') -Destination (Join-Path $stagePath 'cwi-backend') -Recurse
 Copy-Item -LiteralPath (Join-Path $backendPath 'package.json') -Destination (Join-Path $stagePath 'cwi-backend')
 Copy-Item -LiteralPath (Join-Path $backendPath 'package-lock.json') -Destination (Join-Path $stagePath 'cwi-backend')
@@ -167,8 +167,8 @@ $marker = [ordered]@{
   builtAt = [DateTime]::UtcNow.ToString('o')
   checksSkipped = [bool]$SkipChecks
   repositories = [ordered]@{
-    source4 = Get-GitSha $Source4Path
-    cwiDashboard = Get-GitSha $DashboardPath
+    cwiFeLandingPage = Get-GitSha $LandingPath
+    cwiFeDashboard = Get-GitSha $DashboardPath
     cwiBackend = Get-GitSha $backendPath
   }
 }
