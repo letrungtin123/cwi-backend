@@ -138,12 +138,6 @@ const roundtableService = new RoundtableService(roundtableRepository)
 const webinarService = new WebinarService(webinarRepository)
 const app = createApp({ adminRepository, authService, config, exportRepository, logger, pool, quarterlyReportDownloadTokenService, quarterlyReportRepository, quarterlyReportStorage, reportAccessTokenService, reportAssetStorage, submissionReportStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, surveyQuarterImageStorage, surveyQuarterRepository, surveyService, webinarService })
 
-// The global stop for calling cwi-ai follows .env (REPORT_AI_CALLS_PAUSED); the report
-// worker does the same when it starts. A failure here must not stop the API.
-reportRepository.syncGlobalPause(env.reportAiCallsPaused)
-  .then((changed) => { if (changed) logger.warn({ reportAiCallsPaused: env.reportAiCallsPaused }, 'Global report generation stop updated from REPORT_AI_CALLS_PAUSED') })
-  .catch((error: unknown) => logger.error({ error }, 'Could not apply REPORT_AI_CALLS_PAUSED'))
-
 const server = app.listen(env.port, env.host, () => {
   logger.info({
     host: env.host,

@@ -28,8 +28,11 @@ if (!env.reportServiceEnabled) {
     ssl: env.dbSsl,
   })
   const repository = new PgReportRepository(pool)
-  // The global stop follows .env (REPORT_AI_CALLS_PAUSED); the API does the same at start-up.
-  // The worker starts only after it is applied, so its first round already sees it.
+  // The global stop follows .env (REPORT_AI_CALLS_PAUSED). Only this worker writes it, never the
+  // API: during a release the installer test-starts the new API while the previous release's
+  // worker is still running, and that older worker must not see the switch change under it
+  // (2026-11-17 it sent 3 jobs of a quarter that was switched off). The worker starts only after
+  // the value is applied, so its first round already sees it.
   const globalPauseApplied = repository.syncGlobalPause(env.reportAiCallsPaused)
     .then((changed) => { if (changed) logger.warn({ reportAiCallsPaused: env.reportAiCallsPaused }, 'Global report generation stop updated from REPORT_AI_CALLS_PAUSED') })
     .catch((error: unknown) => logger.error({ error }, 'Could not apply REPORT_AI_CALLS_PAUSED'))

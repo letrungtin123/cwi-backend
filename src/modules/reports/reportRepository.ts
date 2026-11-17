@@ -289,9 +289,8 @@ export class PgReportRepository {
     return mapGenerationSettings(result.rows[0])
   }
 
-  // Called at start-up by the API and the report worker: the global stop follows
-  // REPORT_AI_CALLS_PAUSED. Writes only when the stored value differs. Returns true
-  // when it changed something.
+  // Called by the report worker at start-up: the global stop follows REPORT_AI_CALLS_PAUSED.
+  // Writes only when the stored value differs. Returns true when it changed something.
   async syncGlobalPause(paused: boolean): Promise<boolean> {
     const result = await this.pool.query(
       `
