@@ -47,6 +47,8 @@ export type ClaimedEmailJob = {
   id: string
   // Language the survey was taken in; it picks the email text.
   language: SurveyLanguage
+  // Quarter of the survey; the email names that quarter's theme.
+  surveyVersion: string | null
   leaseToken: string
   originalFileName: string
   reportType: ReportEmailType

@@ -64,6 +64,9 @@ const envSchema = z
     REPORT_PUBLIC_TOKEN_SECRET: z.string().trim().optional(),
     REPORT_PUBLIC_TOKEN_TTL_SECONDS: z.coerce.number().int().min(300).max(604800).default(86400),
     REPORT_SERVICE_ENABLED: booleanSchema.default(false),
+    // Emergency stop for every quarter, set by the developers only (the dashboard shows it
+    // read-only). Submissions are kept and their reports wait until it is turned off.
+    REPORT_AI_CALLS_PAUSED: booleanSchema.default(false),
     REPORT_SERVICE_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300000).default(10000),
     // cwi-ai translates a report to English inside the request (about 25s for one report), so it gets its own timeout.
     REPORT_SERVICE_ENGLISH_TIMEOUT_MS: z.coerce.number().int().min(10000).max(300000).default(180000),
@@ -84,6 +87,7 @@ const envSchema = z
     QUARTERLY_REPORT_DOWNLOAD_TOKEN_SECRET: z.string().trim().optional(),
     QUARTERLY_REPORT_DOWNLOAD_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(600),
     QUARTERLY_REPORT_UPLOAD_MAX_BYTES: z.coerce.number().int().min(1048576).max(52428800).default(52428800),
+    SURVEY_QUARTER_IMAGE_BUCKET: bucketNameSchema.default('cwi-survey-quarter-images'),
     MAIL_AUTH_MODE: z.enum(['basic', 'microsoft365-oauth2']).default('basic'),
     MAIL_M365_CLIENT_ID: z.string().trim().optional(),
     MAIL_M365_CLIENT_SECRET: z.string().optional(),
@@ -230,6 +234,8 @@ export const env = {
   rateLimitWindowMs: parsed.data.RATE_LIMIT_WINDOW_MS,
   reportServiceBaseUrl: parsed.data.REPORT_SERVICE_BASE_URL,
   reportServiceEnabled: parsed.data.REPORT_SERVICE_ENABLED,
+  reportAiCallsPaused: parsed.data.REPORT_AI_CALLS_PAUSED,
+  surveyQuarterImageBucket: parsed.data.SURVEY_QUARTER_IMAGE_BUCKET,
   reportServiceTimeoutMs: parsed.data.REPORT_SERVICE_TIMEOUT_MS,
   reportServiceEnglishTimeoutMs: parsed.data.REPORT_SERVICE_ENGLISH_TIMEOUT_MS,
   reportAutoEmailEnabled: parsed.data.REPORT_AUTO_EMAIL_ENABLED,

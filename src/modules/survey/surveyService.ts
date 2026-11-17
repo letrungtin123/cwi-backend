@@ -12,7 +12,7 @@ export class SurveyService {
     private readonly options: {
       reportAccessTokenService?: ReportAccessTokenService
       reportServiceEnabled: boolean
-      reportSettings?: Pick<PgReportRepository, 'getGenerationSettings'>
+      reportSettings?: Pick<PgReportRepository, 'getEffectiveGenerationSettings'>
     } = { reportServiceEnabled: false },
   ) {}
 
@@ -26,7 +26,7 @@ export class SurveyService {
     const access = this.options.reportAccessTokenService.issue(result.reportJob.id)
     // The submission is already stored; the deferral only tells the waiting page what to show.
     const deferral = this.options.reportSettings
-      ? reportDeferral(result.reportJob.status as ReportJobStatusValue, await this.options.reportSettings.getGenerationSettings())
+      ? reportDeferral(result.reportJob.status as ReportJobStatusValue, await this.options.reportSettings.getEffectiveGenerationSettings({ surveyVersion: submission.surveyVersion }))
       : { deferredResultDays: null, resultDeferred: false }
     return {
       ...result,

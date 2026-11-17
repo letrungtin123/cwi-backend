@@ -2,7 +2,7 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { Router } from 'express'
 import type { RuntimeConfig } from '../../config/runtime.js'
-import { decodeCursor } from '../../http/cursor.js'
+import { decodeCursor, isCursorTimestamp } from '../../http/cursor.js'
 import { createAdminRequestRateLimit, getRequiredAdminSession, requireAdminSession } from '../../http/adminSession.js'
 import { HttpError } from '../../http/errors.js'
 import type { AuthService } from '../auth/authService.js'
@@ -27,11 +27,11 @@ function parseLimit(value: unknown) {
   return parsed
 }
 
+// Kept as text so its microseconds reach PostgreSQL unchanged.
 function parseBefore(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) return null
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) throw new HttpError(400, 'invalid_before_cursor', 'Tham số before phải là thời điểm theo chuẩn ISO.')
-  return parsed
+  if (!isCursorTimestamp(value.trim())) throw new HttpError(400, 'invalid_before_cursor', 'Tham số before phải là thời điểm theo chuẩn ISO.')
+  return value.trim()
 }
 
 function parseBeforeId(value: unknown) {

@@ -1,5 +1,5 @@
 import type pg from 'pg'
-import { encodeCursor } from '../../http/cursor.js'
+import { cursorTimestampSql, encodeCursor } from '../../http/cursor.js'
 import { HttpError } from '../../http/errors.js'
 import type { RequestMeta } from '../../http/requestMeta.js'
 import { quarterlyReportSlug, type QuarterlyReportDownloadInput, type QuarterlyReportUploadInput } from './quarterlyReportValidation.js'
@@ -55,6 +55,8 @@ export type CursorPage<T> = {
   hasNextPage: boolean
   items: T[]
   nextCursor: string | null
+  // Rows matching the filters across all pages.
+  totalCount: number
 }
 
 type ReportRow = {
@@ -73,6 +75,7 @@ type ReportRow = {
 }
 
 type DownloadRow = {
+  cursor_at: string
   download_count: number
   email: string
   full_name: string
@@ -299,21 +302,33 @@ export class PgQuarterlyReportRepository {
     return result.rowCount === 1
   }
 
-  async listDownloadsPage(input: { before: Date | null; beforeId: string | null; limit: number; search: string | null }) {
+  async listDownloadsPage(input: { before: string | null; beforeId: string | null; limit: number; search: string | null }) {
     const params: unknown[] = []
     const where: string[] = []
     if (input.search) {
       params.push(`%${input.search}%`)
       where.push(`(d.full_name ILIKE $${params.length} OR d.email ILIKE $${params.length} OR d.phone ILIKE $${params.length} OR d.position ILIKE $${params.length} OR r.slug ILIKE $${params.length})`)
     }
+    // The same filter without the page position gives the total behind "Trang x / y".
+    const filterWhere = [...where]
+    const filterParams = [...params]
     if (input.before && input.beforeId) {
       params.push(input.before, input.beforeId)
       where.push(`(d.requested_at, d.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`)
     }
     params.push(input.limit + 1)
+    const total = this.pool.query<{ total: number }>(
+      [
+        `SELECT count(*)::int AS total`,
+        `FROM public.cwi_quarterly_report_downloads d`,
+        `JOIN public.cwi_quarterly_reports r ON r.id = d.report_id`,
+        filterWhere.length ? `WHERE ${filterWhere.join(' AND ')}` : '',
+      ].filter(Boolean).join(' '),
+      filterParams,
+    )
     const result = await this.pool.query<DownloadRow>(
       [
-        `SELECT d.id, d.full_name, d.email, d.phone, d.position, d.requested_at, d.last_downloaded_at, d.download_count,`,
+        `SELECT d.id, ${cursorTimestampSql('d.requested_at')} AS cursor_at, d.full_name, d.email, d.phone, d.position, d.requested_at, d.last_downloaded_at, d.download_count,`,
         `       r.slug AS report_slug, r.period_year AS report_year, r.period_quarter AS report_quarter`,
         `FROM public.cwi_quarterly_report_downloads d`,
         `JOIN public.cwi_quarterly_reports r ON r.id = d.report_id`,
@@ -327,7 +342,8 @@ export class PgQuarterlyReportRepository {
     return {
       hasNextPage: result.rows.length > input.limit,
       items: rows.map(mapDownload),
-      nextCursor: result.rows.length > input.limit && tail ? encodeCursor(this.cursorSecret, { id: tail.id, timestamp: tail.requested_at }) : null,
+      totalCount: (await total).rows[0]?.total ?? 0,
+      nextCursor: result.rows.length > input.limit && tail ? encodeCursor(this.cursorSecret, { id: tail.id, timestamp: tail.cursor_at }) : null,
     } satisfies CursorPage<QuarterlyReportDownloadListItem>
   }
 

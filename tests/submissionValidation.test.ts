@@ -103,7 +103,7 @@ describe('normalizeSurveySubmission', () => {
     expectHttpErrorCode(() => normalizeSurveySubmission({ ...payload, language: 'fr' }, null), 'invalid_payload')
   })
 
-  it('rejects submissions without the current survey version', () => {
+  it('rejects submissions without a survey version the code has a question set for', () => {
     const payload = {
       answers: partOneAnswers(),
       participant,
@@ -112,7 +112,7 @@ describe('normalizeSurveySubmission', () => {
     }
 
     expectHttpErrorCode(() => normalizeSurveySubmission(payload, null), 'survey_version_mismatch')
-    expectHttpErrorCode(() => normalizeSurveySubmission({ ...payload, surveyVersion: '2026Q3' }, null), 'survey_version_mismatch')
+    expectHttpErrorCode(() => normalizeSurveySubmission({ ...payload, surveyVersion: '2026Q2' }, null), 'survey_version_mismatch')
   })
 
   it('rejects 2026Q3 options that are not part of the 2026Q4 question set', () => {
@@ -208,7 +208,7 @@ describe('normalizeSurveySubmission', () => {
     expect(submission.statusNote).toContain('Không đồng ý')
 
     const reportJob = buildReportJobRequest(submission)
-    expect(reportJob.providerEndpoint).toBe('/v3/reports/anonymous')
+    expect(reportJob.providerEndpoint).toBe('/v3/editions/2026-q4/reports/anonymous')
     expect(reportJob.requestPayload.answers).toHaveLength(18)
   })
 
@@ -240,7 +240,7 @@ describe('normalizeSurveySubmission', () => {
     expect(submission.statusNote).toContain('Đồng ý')
 
     const reportJob = buildReportJobRequest(submission)
-    expect(reportJob.providerEndpoint).toBe('/v3/reports/personalized')
+    expect(reportJob.providerEndpoint).toBe('/v3/editions/2026-q4/reports/personalized')
     expect(reportJob.reportType).toBe('personalized')
     expect(reportJob.requestPayload.answers).toHaveLength(24)
     expect(reportJob.requestPayload.answers.find((answer) => answer.idx === 24)).toEqual({

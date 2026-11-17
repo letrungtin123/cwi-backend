@@ -33,17 +33,18 @@ export type ClaimedReportJob = {
   submissionId: string
 }
 
-// Dashboard switch for calling cwi-ai. While aiCallsEnabled is false the worker
-// leaves every job waiting and the survey says the report arrives by email within
-// deferredResultDays; turning it back on processes the waiting jobs as before.
+// Whether cwi-ai is called. The global row (cwi_report_generation_settings) is the
+// developers' emergency stop, written from REPORT_AI_CALLS_PAUSED at start-up; each
+// quarter also has its own switch and day count in cwi_survey_quarters (dashboard tab
+// "Quý khảo sát"). While calls are off the worker leaves the jobs waiting and the survey
+// says the report arrives by email within deferredResultDays; turning them back on
+// processes the waiting jobs as before.
 export type ReportGenerationSettings = {
   aiCallsEnabled: boolean
   deferredResultDays: number
   updatedAt: string | null
   updatedByEmail: string | null
 }
-
-export type ReportGenerationSettingsUpdate = Pick<ReportGenerationSettings, 'aiCallsEnabled' | 'deferredResultDays'>
 
 export type ReportJobDownload = {
   id: string
@@ -288,18 +289,45 @@ export class PgReportRepository {
     return mapGenerationSettings(result.rows[0])
   }
 
-  async saveGenerationSettings(input: ReportGenerationSettingsUpdate, updatedByEmail: string): Promise<ReportGenerationSettings> {
+  // Called at start-up by the API and the report worker: the global stop follows
+  // REPORT_AI_CALLS_PAUSED. Writes only when the stored value differs. Returns true
+  // when it changed something.
+  async syncGlobalPause(paused: boolean): Promise<boolean> {
+    const result = await this.pool.query(
+      `
+      INSERT INTO public.cwi_report_generation_settings (id, ai_calls_enabled, updated_by_email)
+      VALUES (true, $1, 'REPORT_AI_CALLS_PAUSED')
+      ON CONFLICT (id) DO UPDATE
+      SET ai_calls_enabled = EXCLUDED.ai_calls_enabled, updated_by_email = EXCLUDED.updated_by_email
+      WHERE public.cwi_report_generation_settings.ai_calls_enabled IS DISTINCT FROM EXCLUDED.ai_calls_enabled
+      `,
+      [!paused],
+    )
+    return (result.rowCount ?? 0) > 0
+  }
+
+  // What the survey's waiting page shows for one submission: report creation is on only
+  // when both the global switch and the submission's quarter switch are on; the number
+  // of days comes from the quarter (the global row's, if the quarter has no row).
+  async getEffectiveGenerationSettings(target: { jobId: string } | { surveyVersion: string }): Promise<ReportGenerationSettings> {
+    const byJob = 'jobId' in target
     const result = await this.pool.query<ReportGenerationSettingsRow>(
       `
-      INSERT INTO public.cwi_report_generation_settings (id, ai_calls_enabled, deferred_result_days, updated_by_email)
-      VALUES (true, $1, $2, $3)
-      ON CONFLICT (id) DO UPDATE
-      SET ai_calls_enabled = EXCLUDED.ai_calls_enabled,
-          deferred_result_days = EXCLUDED.deferred_result_days,
-          updated_by_email = EXCLUDED.updated_by_email
-      RETURNING ai_calls_enabled, deferred_result_days, updated_by_email, updated_at
+      WITH target AS (
+        SELECT ${byJob
+          ? '(SELECT submission.survey_version FROM public.cwi_report_jobs AS job JOIN public.cwi_survey_submissions AS submission ON submission.id = job.submission_id WHERE job.id = $1::uuid)'
+          : '$1::text'} AS survey_version
+      )
+      SELECT
+        COALESCE(settings.ai_calls_enabled, true) AND COALESCE(quarter.report_generation_enabled, true) AS ai_calls_enabled,
+        COALESCE(quarter.deferred_result_days, settings.deferred_result_days, 7) AS deferred_result_days,
+        COALESCE(quarter.updated_by_email, settings.updated_by_email) AS updated_by_email,
+        COALESCE(quarter.updated_at, settings.updated_at, now()) AS updated_at
+      FROM target
+      LEFT JOIN public.cwi_report_generation_settings AS settings ON settings.id
+      LEFT JOIN public.cwi_survey_quarters AS quarter ON quarter.survey_version = target.survey_version
       `,
-      [input.aiCallsEnabled, input.deferredResultDays, updatedByEmail],
+      [byJob ? target.jobId : target.surveyVersion],
     )
     return mapGenerationSettings(result.rows[0])
   }
@@ -326,6 +354,13 @@ export class PgReportRepository {
             status <> 'pending'
             OR (SELECT count(*) FROM public.cwi_report_jobs AS in_flight WHERE in_flight.status = ANY($4::text[])) < $5
           )
+          -- A quarter turned off in the dashboard keeps its jobs waiting (none processed).
+          AND COALESCE((
+            SELECT quarter.report_generation_enabled
+            FROM public.cwi_survey_submissions AS submission
+            JOIN public.cwi_survey_quarters AS quarter ON quarter.survey_version = submission.survey_version
+            WHERE submission.id = cwi_report_jobs.submission_id
+          ), true)
         ORDER BY created_at ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED

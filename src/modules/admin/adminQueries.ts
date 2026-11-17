@@ -1,9 +1,11 @@
+import { cursorTimestampSql } from '../../http/cursor.js'
 import { submissionDeletableSql } from '../submissionDeletion/submissionDeletionRepository.js'
 
 import type { ReportSummary, ReportStatusFilter, SubmissionSource, SubmissionSourceFilter, SubmissionListItem, RoundtableSubmissionSummary, RoundtableRegistrationListItem, RoundtableRegistrationDetail } from './adminTypes.js'
 
 // SQL, row mapping and shared filters behind PgAdminRepository (adminRepository.ts).
 export type SubmissionRow = {
+  cursor_at: string
   answers_count: number
   company_name: string | null
   deletable: boolean
@@ -63,6 +65,7 @@ export type StatsRow = {
 }
 
 export type RoundtableRegistrationRow = {
+  cursor_at: string
   client_meta: Record<string, unknown>
   company_name: string | null
   email: string
@@ -103,6 +106,7 @@ export type RoundtableStatsRow = {
 export const submissionSelect = `
   SELECT
     s.id,
+    ${cursorTimestampSql('s.submitted_at')} AS cursor_at,
     s.submission_status,
     s.status_note,
     s.full_name,
@@ -132,7 +136,8 @@ export const submissionSelect = `
     report.updated_at AS report_updated_at,
     report.pdf_storage_path AS report_pdf_storage_path,
     COALESCE(report.last_error_message, report.error_message) AS report_last_error_message,
-    COALESCE((SELECT NOT settings.ai_calls_enabled FROM public.cwi_report_generation_settings AS settings WHERE settings.id), false) AS report_generation_paused,
+    (COALESCE((SELECT NOT settings.ai_calls_enabled FROM public.cwi_report_generation_settings AS settings WHERE settings.id), false)
+      OR COALESCE((SELECT NOT quarter.report_generation_enabled FROM public.cwi_survey_quarters AS quarter WHERE quarter.survey_version = s.survey_version), false)) AS report_generation_paused,
     ${submissionDeletableSql('s')} AS deletable
   FROM public.cwi_survey_submissions AS s
   LEFT JOIN public.cwi_survey_sources AS survey_source ON survey_source.id = s.survey_source_id
@@ -148,6 +153,7 @@ export const submissionSelect = `
 export const roundtableSelect = `
   SELECT
     r.id,
+    ${cursorTimestampSql('r.registered_at')} AS cursor_at,
     r.full_name,
     r.company_name,
     r.email,
@@ -174,7 +180,8 @@ export const roundtableSelect = `
     report.updated_at AS report_updated_at,
     report.pdf_storage_path AS report_pdf_storage_path,
     COALESCE(report.last_error_message, report.error_message) AS report_last_error_message,
-    COALESCE((SELECT NOT settings.ai_calls_enabled FROM public.cwi_report_generation_settings AS settings WHERE settings.id), false) AS report_generation_paused
+    (COALESCE((SELECT NOT settings.ai_calls_enabled FROM public.cwi_report_generation_settings AS settings WHERE settings.id), false)
+      OR COALESCE((SELECT NOT quarter.report_generation_enabled FROM public.cwi_survey_quarters AS quarter WHERE quarter.survey_version = s.survey_version), false)) AS report_generation_paused
   FROM public.cwi_roundtable_registrations AS r
   LEFT JOIN public.cwi_survey_submissions AS s ON s.id = r.submission_id
   LEFT JOIN LATERAL (
@@ -204,8 +211,9 @@ export function toIso(value: Date) {
   return value.toISOString()
 }
 
-// A report job that has not finished yet. While report creation is paused in the
-// dashboard nothing is being created, so it reads "waiting" instead of "creating".
+// A report job that has not finished yet. While report creation is paused (for every
+// quarter, or for the submission's quarter) nothing is being created, so it reads
+// "waiting" instead of "creating".
 export function unfinishedReportSummary(row: Pick<SubmissionRow, 'report_generation_paused' | 'report_job_id' | 'report_last_error_message' | 'report_updated_at'>): ReportSummary {
   const generationPaused = row.report_generation_paused === true
   return {

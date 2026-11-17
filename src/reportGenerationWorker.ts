@@ -28,6 +28,11 @@ if (!env.reportServiceEnabled) {
     ssl: env.dbSsl,
   })
   const repository = new PgReportRepository(pool)
+  // The global stop follows .env (REPORT_AI_CALLS_PAUSED); the API does the same at start-up.
+  // The worker starts only after it is applied, so its first round already sees it.
+  const globalPauseApplied = repository.syncGlobalPause(env.reportAiCallsPaused)
+    .then((changed) => { if (changed) logger.warn({ reportAiCallsPaused: env.reportAiCallsPaused }, 'Global report generation stop updated from REPORT_AI_CALLS_PAUSED') })
+    .catch((error: unknown) => logger.error({ error }, 'Could not apply REPORT_AI_CALLS_PAUSED'))
   const assetStorage = new ReportAssetStorage({
     bucket: env.reportStorageBucket,
     serviceRoleKey: env.supabaseServiceRoleKey,
@@ -69,5 +74,5 @@ if (!env.reportServiceEnabled) {
   process.on('SIGINT', () => { void shutdown('SIGINT') })
   process.on('SIGTERM', () => { void shutdown('SIGTERM') })
   logger.info({ workerId: `report-generation-${process.pid}-${randomUUID()}` }, 'Report generation process starting')
-  worker.start()
+  void globalPauseApplied.then(() => { if (!stopping) worker.start() })
 }

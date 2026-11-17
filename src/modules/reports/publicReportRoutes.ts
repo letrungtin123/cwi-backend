@@ -40,7 +40,7 @@ export function createPublicReportRouter(
       assertAccess(req, jobId, accessTokens)
       const job = await repository.getPublicReportJob(jobId)
       if (!job) throw new HttpError(404, 'report_not_found', 'Báo cáo không tồn tại hoặc quyền truy cập đã hết hạn.')
-      const deferral = reportDeferral(job.status, await repository.getGenerationSettings())
+      const deferral = reportDeferral(job.status, await repository.getEffectiveGenerationSettings({ jobId }))
 
       res.setHeader('Cache-Control', 'no-store')
       res.json({

@@ -2,16 +2,12 @@ import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { HttpError } from '../../http/errors.js'
 import {
-  ALL_QUESTION_IDXS,
-  OTHER_OPTION,
-  PART_ONE_QUESTION_IDXS,
   SURVEY_LANGUAGES,
-  SURVEY_QUESTION_BY_IDX,
-  SURVEY_VERSION,
   type SurveyLanguage,
   type SurveyQuestion,
   type SurveyQuestionType,
 } from './surveyQuestions.js'
+import { getSurveyEdition, SURVEY_VERSIONS, type SurveyEdition } from './surveyEditions.js'
 import {
   PRIVACY_CONSENTS,
   SUBMISSION_STATUSES,
@@ -171,7 +167,7 @@ function normalizeLikertAnswer(question: SurveyQuestion, raw: RawAnswer): Normal
   }
 }
 
-function normalizeMcqAnswer(question: SurveyQuestion, raw: RawAnswer): NormalizedAnswer {
+function normalizeMcqAnswer(question: SurveyQuestion, raw: RawAnswer, otherOption: string): NormalizedAnswer {
   if (typeof raw.answer !== 'string') {
     validationError('invalid_mcq_answer', `Question ${question.idx} requires a text option.`, {
       idx: question.idx,
@@ -188,10 +184,10 @@ function normalizeMcqAnswer(question: SurveyQuestion, raw: RawAnswer): Normalize
     })
   }
 
-  if (selectedOption === OTHER_OPTION) {
+  if (selectedOption === otherOption) {
     const otherText = raw.otherText ? normalizeText(raw.otherText) : ''
     if (!otherText) {
-      validationError('missing_other_text', `Question ${question.idx} requires otherText for "${OTHER_OPTION}".`, {
+      validationError('missing_other_text', `Question ${question.idx} requires otherText for "${otherOption}".`, {
         idx: question.idx,
       })
     }
@@ -252,14 +248,14 @@ function normalizeUrlAnswer(question: SurveyQuestion, raw: RawAnswer): Normalize
   }
 }
 
-function normalizeAnswer(raw: RawAnswer) {
-  const question = SURVEY_QUESTION_BY_IDX.get(raw.idx)
+function normalizeAnswer(edition: SurveyEdition, raw: RawAnswer) {
+  const question = edition.questionByIdx.get(raw.idx)
   if (!question) {
     validationError('unknown_question', `Unknown question index ${raw.idx}.`, { idx: raw.idx })
   }
 
   if (question.type === 'likert') return normalizeLikertAnswer(question, raw)
-  if (question.type === 'mcq') return normalizeMcqAnswer(question, raw)
+  if (question.type === 'mcq') return normalizeMcqAnswer(question, raw, edition.otherOption)
   return normalizeUrlAnswer(question, raw)
 }
 
@@ -281,9 +277,9 @@ function normalizeRoundtable(raw: RawSubmission['roundtableRegistration']): Roun
   }
 }
 
-function assertAnswerSet(status: SubmissionStatus, answersByIdx: Map<number, NormalizedAnswer>) {
+function assertAnswerSet(edition: SurveyEdition, status: SubmissionStatus, answersByIdx: Map<number, NormalizedAnswer>) {
   const rule = SUBMISSION_STATUS_RULES[status]
-  const required = rule.requiredPart === 'part1' ? PART_ONE_QUESTION_IDXS : ALL_QUESTION_IDXS
+  const required = rule.requiredPart === 'part1' ? edition.partOneQuestionIdxs : edition.allQuestionIdxs
   const allowed = new Set<number>(required)
   const missing = required.filter((idx) => !answersByIdx.has(idx))
   const extra = Array.from(answersByIdx.keys()).filter((idx) => !allowed.has(idx))
@@ -321,11 +317,15 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
 
   const raw = parsed.data
 
-  // A page opened before a question-set release still holds the previous
-  // edition's questions; reject it instead of storing answers under new text.
-  if (raw.surveyVersion !== SURVEY_VERSION) {
+  // The respondent picks the quarter on the landing page; answers are checked against
+  // that quarter's question set. A page that sends no version, or one the code no
+  // longer has, is rejected instead of storing answers under the wrong questions.
+  // A quarter hidden in the dashboard is still accepted, so a survey started before it
+  // was hidden is not lost.
+  const edition = getSurveyEdition(raw.surveyVersion)
+  if (!edition) {
     validationError('survey_version_mismatch', 'Bộ câu hỏi khảo sát đã được cập nhật. Vui lòng tải lại trang và gửi lại.', {
-      expectedSurveyVersion: SURVEY_VERSION,
+      expectedSurveyVersions: SURVEY_VERSIONS,
       receivedSurveyVersion: raw.surveyVersion ?? null,
     })
   }
@@ -361,12 +361,12 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
       })
     }
 
-    answersByIdx.set(answer.idx, normalizeAnswer(answer))
+    answersByIdx.set(answer.idx, normalizeAnswer(edition, answer))
   }
 
-  assertAnswerSet(raw.submissionStatus, answersByIdx)
+  assertAnswerSet(edition, raw.submissionStatus, answersByIdx)
 
-  const orderedAnswers = (rule.requiredPart === 'part1' ? PART_ONE_QUESTION_IDXS : ALL_QUESTION_IDXS).map((idx) => {
+  const orderedAnswers = (rule.requiredPart === 'part1' ? edition.partOneQuestionIdxs : edition.allQuestionIdxs).map((idx) => {
     const answer = answersByIdx.get(idx)
     if (!answer) {
       validationError('missing_required_answers', `Missing answer ${idx}.`, { idx })
@@ -400,7 +400,7 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
     scores,
     statusNote: raw.statusNote ? normalizeText(raw.statusNote) : rule.defaultNote,
     submissionStatus: raw.submissionStatus,
-    surveyVersion: SURVEY_VERSION,
+    surveyVersion: edition.version,
   }
 
   return {

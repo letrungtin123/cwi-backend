@@ -123,8 +123,9 @@ export class ReportWorker {
     this.isRunning = true
 
     try {
-      // Every job step calls cwi-ai, so while the dashboard switch is off no job is
-      // claimed; waiting jobs keep their state and resume when it is turned back on.
+      // Every job step calls cwi-ai, so while the global stop (REPORT_AI_CALLS_PAUSED) is
+      // on no job is claimed; waiting jobs keep their state and resume when it is turned
+      // off. A quarter switched off in the dashboard is skipped by claimNextReadyJob.
       const settings = await this.dependencies.repository.getGenerationSettings()
       this.noteAiCallsPaused(!settings.aiCallsEnabled)
       if (!settings.aiCallsEnabled) return
@@ -142,7 +143,7 @@ export class ReportWorker {
 
   private noteAiCallsPaused(paused: boolean) {
     if (paused === this.aiCallsPaused) return
-    if (paused) this.dependencies.logger.warn({ workerId: this.workerId }, 'Report generation paused: cwi-ai calls are turned off in the dashboard')
+    if (paused) this.dependencies.logger.warn({ workerId: this.workerId }, 'Report generation paused for every quarter: REPORT_AI_CALLS_PAUSED is on')
     else if (this.aiCallsPaused !== null) this.dependencies.logger.info({ workerId: this.workerId }, 'Report generation resumed: cwi-ai calls are turned on')
     this.aiCallsPaused = paused
   }

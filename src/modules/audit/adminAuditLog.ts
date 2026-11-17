@@ -32,7 +32,7 @@ type AuditRow = {
 export async function writeAdminAudit(
   db: Queryable,
   actor: AuditActor,
-  entry: { action: string; metadata: Record<string, unknown>; targetId: string; targetType: string },
+  entry: { action: string; metadata: Record<string, unknown>; targetId: string | null; targetType: string },
 ): Promise<void> {
   await db.query(
     `INSERT INTO public.cwi_admin_audit_logs (admin_user_id, action, target_type, target_id, metadata, client_ip_hash, user_agent)

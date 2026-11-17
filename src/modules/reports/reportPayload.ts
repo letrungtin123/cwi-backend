@@ -1,5 +1,5 @@
 import type { NormalizedAnswer, NormalizedSurveySubmission } from '../survey/submissionValidation.js'
-import { OTHER_OPTION } from '../survey/surveyQuestions.js'
+import { getSurveyEdition, type SurveyEdition } from '../survey/surveyEditions.js'
 
 export type AiReportType = 'anonymous' | 'personalized'
 
@@ -45,14 +45,17 @@ export function normalizeStoredReportPayload(payload: unknown) {
   }
 }
 
-// Survey question and option text is the CWI AI V3 registry text, so answers
-// are forwarded verbatim. An "other" choice sends the option plus its text.
-function toAiAnswer(answer: NormalizedAnswer): AiReportAnswer {
+// Survey question and option text is the CWI AI V3 registry text of the submission's
+// edition, so answers are forwarded verbatim, apart from the few texts the edition
+// translates (2026Q3 question 6). An "other" choice sends the edition's "other"
+// option plus the respondent's text.
+function toAiAnswer(edition: SurveyEdition, answer: NormalizedAnswer): AiReportAnswer {
+  const question = edition.aiQuestionText.get(answer.idx) ?? answer.questionText
   if (answer.otherText) {
-    return { answer: OTHER_OPTION, idx: answer.idx, other_text: answer.otherText, question: answer.questionText }
+    return { answer: edition.aiOtherOption, idx: answer.idx, other_text: answer.otherText, question }
   }
 
-  return { answer: answer.answerForReport, idx: answer.idx, question: answer.questionText }
+  return { answer: answer.answerForReport, idx: answer.idx, question }
 }
 
 function buildBasePayload(submission: NormalizedSurveySubmission): Omit<AiReportPayload, 'answers'> {
@@ -68,14 +71,19 @@ function buildBasePayload(submission: NormalizedSurveySubmission): Omit<AiReport
   }
 }
 
+// The report is created through the edition route (/v3/editions/2026-q3/...), never
+// the unversioned /v3/reports/* one: that one follows whichever quarter cwi-ai has
+// activated, so it would reject an earlier quarter's answers.
 export function buildReportJobRequest(submission: NormalizedSurveySubmission): ReportJobCreateInput {
+  const edition = getSurveyEdition(submission.surveyVersion)
+  if (!edition) throw new Error(`No survey edition ${submission.surveyVersion}`)
   const reportType: AiReportType = submission.submissionStatus === 'full_private_report' ? 'personalized' : 'anonymous'
-  const endpoint = reportType === 'personalized' ? '/v3/reports/personalized' : '/v3/reports/anonymous'
+  const endpoint = `/v3/editions/${edition.aiEditionId}/reports/${reportType}`
   // The anonymous report accepts exactly the 18 Part 1 answers.
   const answers = reportType === 'personalized' ? submission.answers : submission.answers.filter((answer) => answer.part === 1)
   const requestPayload: AiReportPayload = {
     ...buildBasePayload(submission),
-    answers: answers.map(toAiAnswer),
+    answers: answers.map((answer) => toAiAnswer(edition, answer)),
   }
 
   return {

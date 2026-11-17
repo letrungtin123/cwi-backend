@@ -17,17 +17,34 @@ function invalidCursor(): never {
   throw new HttpError(400, 'invalid_cursor', 'Tham số phân trang (cursor) không hợp lệ.')
 }
 
-export function encodeCursor(secret: string, input: { id: string; timestamp: Date }) {
+// The timestamp is the row's exact time as PostgreSQL gives it (microseconds), not a JS Date
+// (milliseconds): rows less than a millisecond apart would otherwise be skipped between pages.
+// SQL helpers: cursorTimestampSql().
+export function encodeCursor(secret: string, input: { id: string; timestamp: string }) {
+  if (!isCursorTimestamp(input.timestamp)) throw new Error('Cursor timestamp must be an ISO time')
   const payload: CursorPayload = {
     id: input.id,
-    timestamp: input.timestamp.toISOString(),
+    timestamp: input.timestamp,
     version: 1,
   }
   const encodedPayload = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
   return `${encodedPayload}.${sign(encodedPayload, secret)}`
 }
 
-export function decodeCursor(secret: string, value: unknown): { before: Date; beforeId: string } {
+// "2026-11-17T05:12:34.123456Z": what cursorTimestampSql() produces, or an older ms ISO time.
+const cursorTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/
+
+export function isCursorTimestamp(value: unknown): value is string {
+  return typeof value === 'string' && cursorTimestampPattern.test(value) && !Number.isNaN(Date.parse(value))
+}
+
+// A column's exact UTC time with microseconds, for encodeCursor().
+export function cursorTimestampSql(column: string) {
+  return `to_char(${column} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
+}
+
+// "before" is passed to PostgreSQL as text ($n::timestamptz), keeping its microseconds.
+export function decodeCursor(secret: string, value: unknown): { before: string; beforeId: string } {
   if (typeof value !== 'string' || value.length < 20 || value.length > 512) invalidCursor()
 
   const separator = value.lastIndexOf('.')
@@ -56,8 +73,7 @@ export function decodeCursor(secret: string, value: unknown): { before: Date; be
     invalidCursor()
   }
 
-  const before = new Date(candidate.timestamp)
-  if (Number.isNaN(before.getTime())) invalidCursor()
+  if (!isCursorTimestamp(candidate.timestamp)) invalidCursor()
 
-  return { before, beforeId: candidate.id }
+  return { before: candidate.timestamp, beforeId: candidate.id }
 }

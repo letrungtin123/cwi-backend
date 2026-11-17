@@ -27,26 +27,22 @@ export class PgAdminRepository {
     private readonly cursorSecret: string,
   ) {}
 
-  private nextCursor(timestamp: Date, id: string) {
+  // Rows matching a list's filters, whatever page is shown.
+  private async countRows(select: string, where: string[], params: unknown[]) {
+    const result = await this.pool.query<{ total: number }>(
+      `SELECT count(*)::int AS total FROM (${select} ${where.length ? 'WHERE ' + where.join(' AND ') : ''}) AS filtered`,
+      params,
+    )
+    return result.rows[0]?.total ?? 0
+  }
+
+  private nextCursor(timestamp: string, id: string) {
     return encodeCursor(this.cursorSecret, { id, timestamp })
   }
 
   async listRoundtableRegistrationsPage(filters: RoundtableRegistrationFilters): Promise<CursorPage<RoundtableRegistrationListItem>> {
     const params: unknown[] = []
     const where: string[] = []
-
-    if (filters.before) {
-      params.push(filters.before)
-      const beforeParam = params.length
-
-      if (filters.beforeId) {
-        params.push(filters.beforeId)
-        const beforeIdParam = params.length
-        where.push('(r.registered_at, r.id) < ($' + beforeParam + '::timestamptz, $' + beforeIdParam + '::uuid)')
-      } else {
-        where.push('r.registered_at < $' + beforeParam + '::timestamptz')
-      }
-    }
 
     if (filters.linkStatus === 'linked') {
       where.push('r.submission_id IS NOT NULL')
@@ -74,6 +70,23 @@ export class PgAdminRepository {
       )
     }
 
+    // The same filters without the page position give the total behind "Trang x / y".
+    const filterWhere = [...where]
+    const filterParams = [...params]
+
+    if (filters.before) {
+      params.push(filters.before)
+      const beforeParam = params.length
+
+      if (filters.beforeId) {
+        params.push(filters.beforeId)
+        const beforeIdParam = params.length
+        where.push('(r.registered_at, r.id) < ($' + beforeParam + '::timestamptz, $' + beforeIdParam + '::uuid)')
+      } else {
+        where.push('r.registered_at < $' + beforeParam + '::timestamptz')
+      }
+    }
+
     params.push(filters.limit + 1)
     const query = [
       roundtableSelect,
@@ -81,15 +94,19 @@ export class PgAdminRepository {
       'ORDER BY r.registered_at DESC, r.id DESC',
       'LIMIT $' + params.length,
     ].join('\n')
-    const result = await this.pool.query<RoundtableRegistrationRow>(query, params)
+    const [result, totalCount] = await Promise.all([
+      this.pool.query<RoundtableRegistrationRow>(query, params),
+      this.countRows(roundtableSelect, filterWhere, filterParams),
+    ])
     const hasNextPage = result.rows.length > filters.limit
     const rows = result.rows.slice(0, filters.limit)
     const lastRow = rows.at(-1)
 
     return {
       hasNextPage,
+      totalCount,
       items: rows.map(mapRoundtableRegistration),
-      nextCursor: hasNextPage && lastRow ? this.nextCursor(lastRow.registered_at, lastRow.id) : null,
+      nextCursor: hasNextPage && lastRow ? this.nextCursor(lastRow.cursor_at, lastRow.id) : null,
     }
   }
 
@@ -155,19 +172,6 @@ export class PgAdminRepository {
     const params: unknown[] = []
     const where: string[] = []
 
-    if (filters.before) {
-      params.push(filters.before)
-      const beforeParam = params.length
-
-      if (filters.beforeId) {
-        params.push(filters.beforeId)
-        const beforeIdParam = params.length
-        where.push('(r.registered_at, r.id) < ($' + beforeParam + '::timestamptz, $' + beforeIdParam + '::uuid)')
-      } else {
-        where.push('r.registered_at < $' + beforeParam + '::timestamptz')
-      }
-    }
-
     if (filters.linkStatus === 'linked') {
       where.push('r.submission_id IS NOT NULL')
     } else if (filters.linkStatus === 'standalone') {
@@ -187,6 +191,23 @@ export class PgAdminRepository {
       )
     }
 
+    // The same filters without the page position give the total behind "Trang x / y".
+    const filterWhere = [...where]
+    const filterParams = [...params]
+
+    if (filters.before) {
+      params.push(filters.before)
+      const beforeParam = params.length
+
+      if (filters.beforeId) {
+        params.push(filters.beforeId)
+        const beforeIdParam = params.length
+        where.push('(r.registered_at, r.id) < ($' + beforeParam + '::timestamptz, $' + beforeIdParam + '::uuid)')
+      } else {
+        where.push('r.registered_at < $' + beforeParam + '::timestamptz')
+      }
+    }
+
     params.push(filters.limit + 1)
     const query = [
       webinarSelect,
@@ -194,15 +215,19 @@ export class PgAdminRepository {
       'ORDER BY r.registered_at DESC, r.id DESC',
       'LIMIT $' + params.length,
     ].join('\n')
-    const result = await this.pool.query<RoundtableRegistrationRow>(query, params)
+    const [result, totalCount] = await Promise.all([
+      this.pool.query<RoundtableRegistrationRow>(query, params),
+      this.countRows(webinarSelect, filterWhere, filterParams),
+    ])
     const hasNextPage = result.rows.length > filters.limit
     const rows = result.rows.slice(0, filters.limit)
     const lastRow = rows.at(-1)
 
     return {
       hasNextPage,
+      totalCount,
       items: rows.map(mapRoundtableRegistration),
-      nextCursor: hasNextPage && lastRow ? this.nextCursor(lastRow.registered_at, lastRow.id) : null,
+      nextCursor: hasNextPage && lastRow ? this.nextCursor(lastRow.cursor_at, lastRow.id) : null,
     }
   }
 
@@ -253,19 +278,6 @@ export class PgAdminRepository {
     const params: unknown[] = []
     const where: string[] = []
 
-    if (filters.before) {
-      params.push(filters.before)
-      const beforeParam = params.length
-
-      if (filters.beforeId) {
-        params.push(filters.beforeId)
-        const beforeIdParam = params.length
-        where.push('(s.submitted_at, s.id) < ($' + beforeParam + '::timestamptz, $' + beforeIdParam + '::uuid)')
-      } else {
-        where.push('s.submitted_at < $' + beforeParam + '::timestamptz')
-      }
-    }
-
     if (filters.status) {
       params.push(filters.status)
       where.push('s.submission_status = $' + params.length)
@@ -312,6 +324,23 @@ export class PgAdminRepository {
       )
     }
 
+    // The same filters without the page position give the total behind "Trang x / y".
+    const filterWhere = [...where]
+    const filterParams = [...params]
+
+    if (filters.before) {
+      params.push(filters.before)
+      const beforeParam = params.length
+
+      if (filters.beforeId) {
+        params.push(filters.beforeId)
+        const beforeIdParam = params.length
+        where.push('(s.submitted_at, s.id) < ($' + beforeParam + '::timestamptz, $' + beforeIdParam + '::uuid)')
+      } else {
+        where.push('s.submitted_at < $' + beforeParam + '::timestamptz')
+      }
+    }
+
     params.push(filters.limit + 1)
     const query = [
       submissionSelect,
@@ -319,15 +348,19 @@ export class PgAdminRepository {
       'ORDER BY s.submitted_at DESC, s.id DESC',
       'LIMIT $' + params.length,
     ].join('\n')
-    const result = await this.pool.query<SubmissionRow>(query, params)
+    const [result, totalCount] = await Promise.all([
+      this.pool.query<SubmissionRow>(query, params),
+      this.countRows(submissionSelect, filterWhere, filterParams),
+    ])
     const hasNextPage = result.rows.length > filters.limit
     const rows = result.rows.slice(0, filters.limit)
     const lastRow = rows.at(-1)
 
     return {
       hasNextPage,
+      totalCount,
       items: rows.map(mapListItem),
-      nextCursor: hasNextPage && lastRow ? this.nextCursor(lastRow.submitted_at, lastRow.id) : null,
+      nextCursor: hasNextPage && lastRow ? this.nextCursor(lastRow.cursor_at, lastRow.id) : null,
     }
   }
 

@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto'
+import { decodeCursor } from '../../src/http/cursor.js'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { PgAdminRepository, type ReportStatusFilter, type SubmissionListFilters } from '../../src/modules/admin/adminRepository.js'
 import { PgRoundtableRepository } from '../../src/modules/roundtable/roundtableRepository.js'
 import { normalizeRoundtableRegistration } from '../../src/modules/roundtable/roundtableValidation.js'
 import { normalizeSurveySubmission } from '../../src/modules/survey/submissionValidation.js'
-import { SURVEY_VERSION } from '../../src/modules/survey/surveyQuestions.js'
+import { LATEST_SURVEY_VERSION as SURVEY_VERSION } from '../../src/modules/survey/surveyEditions.js'
 import { PgSurveyRepository } from '../../src/modules/survey/surveyRepository.js'
 import { PgWebinarRepository } from '../../src/modules/webinar/webinarRepository.js'
 import { normalizeWebinarRegistration } from '../../src/modules/webinar/webinarValidation.js'
@@ -66,6 +67,29 @@ describe.skipIf(!reachable)('admin queries on the local database (rolled back)',
     return new PgSurveyRepository(db.pool).createSubmission(submission, meta, null)
   }
 
+  it('counts every row matching the filters, on every page', async () => {
+    const ids = [(await createSubmission(false)).id, (await createSubmission(false)).id, (await createSubmission(false)).id]
+    // The rows share one time (one transaction, now()): the next page must still find the third,
+    // which needs the cursor's microseconds.
+    const first = await admin.listSubmissionsPage(baseFilters({ limit: 2, search: email }))
+    expect(first).toMatchObject({ hasNextPage: true, totalCount: 3 })
+    expect(first.items).toHaveLength(2)
+
+    const cursor = decodeCursor('db-test-cursor-secret-0123456789abcdef', first.nextCursor)
+    const second = await admin.listSubmissionsPage(baseFilters({ ...cursor, limit: 2, search: email }))
+    expect(second).toMatchObject({ hasNextPage: false, totalCount: 3 })
+    expect([...first.items, ...second.items].map((item) => item.id).sort()).toEqual([...ids].sort())
+
+    const none = await admin.listSubmissionsPage(baseFilters({ search: email, status: 'part1_only' }))
+    expect(none.totalCount).toBe(0)
+
+    const roundtable = await admin.listRoundtableRegistrationsPage({ before: null, beforeId: null, limit: 1, linkStatus: null, search: email })
+    expect(roundtable.totalCount).toBe(0)
+    await createSubmission(true)
+    const withRoundtable = await admin.listRoundtableRegistrationsPage({ before: null, beforeId: null, limit: 1, linkStatus: null, search: email })
+    expect(withRoundtable.totalCount).toBe(1)
+  })
+
   it('lists, searches and opens a new survey submission', async () => {
     const created = await createSubmission(false)
     const page = await admin.listSubmissionsPage(baseFilters({ search: email }))
@@ -110,7 +134,7 @@ describe.skipIf(!reachable)('admin queries on the local database (rolled back)',
     const first = await admin.listSubmissionsPage(baseFilters({ limit: 3 }))
     if (!first.hasNextPage) return
     const [last] = first.items.slice(-1)
-    const second = await admin.listSubmissionsPage(baseFilters({ before: new Date(last!.submittedAt), beforeId: last!.id, limit: 3 }))
+    const second = await admin.listSubmissionsPage(baseFilters({ ...decodeCursor('db-test-cursor-secret-0123456789abcdef', first.nextCursor), limit: 3 }))
     const firstIds = new Set(first.items.map((item) => item.id))
     expect(second.items.some((item) => firstIds.has(item.id))).toBe(false)
     expect(Date.parse(second.items[0]!.submittedAt)).toBeLessThanOrEqual(Date.parse(last!.submittedAt))

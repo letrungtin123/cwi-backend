@@ -186,10 +186,10 @@ export class SmtpReportMailer {
     await (await this.getTransport()).verify()
   }
 
-  async send(input: { language: SurveyLanguage; messageId: string; originalFileName: string; pdfPath: string; recipientEmail: string; recipientName: string; reportType: ReportEmailType }) {
+  async send(input: { language: SurveyLanguage; messageId: string; originalFileName: string; pdfPath: string; recipientEmail: string; recipientName: string; reportType: ReportEmailType; surveyVersion?: string | null }) {
     const transporter = await this.getTransport()
     try {
-      const { html, subject, text } = buildReportEmail(input.reportType, input.language)
+      const { html, subject, text } = buildReportEmail(input.reportType, input.language, input.surveyVersion)
       const info = await transporter.sendMail({
         attachments: [buildReportPdfAttachment({ originalFileName: input.originalFileName, pdfPath: input.pdfPath })],
         from: { address: this.config.fromAddress, name: this.config.fromName },

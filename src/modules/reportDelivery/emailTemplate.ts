@@ -1,3 +1,4 @@
+import { getSurveyEdition, LATEST_SURVEY_VERSION } from '../survey/surveyEditions.js'
 import type { SurveyLanguage } from '../survey/surveyQuestions.js'
 import type { ReportEmailType } from './reportDeliveryTypes.js'
 
@@ -28,7 +29,7 @@ const personalizedContent: ReportEmailContent = {
   paragraphs: [
     'Thay mặt Ban tổ chức CEO Workforce Index (CWI), tôi xin trân trọng cảm ơn quý Anh/Chị đã dành thời gian hoàn thành khảo sát trong mùa đầu tiên của CEO Workforce Index.',
     'Sự tham gia của quý Anh/Chị không chỉ mang lại những góc nhìn và thông tin thực tế, hữu dụng và những khuyến nghị hành động cụ thể cho chính công ty mình; mà còn là đóng góp đáng quý vào bộ dữ liệu đối chuẩn đầu tiên về "Hệ cộng lực" (workforce plus) cho cộng đồng doanh nghiệp tại Việt Nam. Đây là những phép đo và biện pháp để nâng cao năng lực thực thi tích hợp gồm con người, AI, tự động hóa, hệ sinh thái để đáp ứng kỳ vọng tăng trưởng cho doanh nghiệp tại Việt Nam.',
-    'Từ những thông tin Quý Anh/Chị đã chia sẻ, CWI xin trân trọng gửi Báo cáo dành riêng cho doanh nghiệp, nhằm hỗ trợ Anh/Chị nhìn sâu hơn và có hành động ưu tiên trong 90 ngày tới về "Hệ cộng lực sẵn sàng cho tương lai" - một trong bốn chủ điểm chính của "Hệ cộng lực".',
+    'Từ những thông tin Quý Anh/Chị đã chia sẻ, CWI xin trân trọng gửi Báo cáo dành riêng cho doanh nghiệp, nhằm hỗ trợ Anh/Chị nhìn sâu hơn và có hành động ưu tiên trong 90 ngày tới về "{theme}" - một trong bốn chủ điểm chính của "Hệ cộng lực".',
   ],
   listIntro: 'Vui lòng xem Báo cáo đính kèm trong email này, với cam kết cao về tính độc lập và bảo mật thông tin, hy vọng giúp Anh/Chị:',
   listItems: [
@@ -51,7 +52,7 @@ const anonymousContent: ReportEmailContent = {
     'Thay mặt Ban Tổ chức CEO Workforce Index (CWI), tôi xin trân trọng cảm ơn Quý Anh/Chị đã dành thời gian hoàn thành khảo sát trong mùa đầu tiên của CEO Workforce Index.',
     'Sự tham gia của Quý Anh/Chị không chỉ mang lại những góc nhìn và thông tin thực tế, hữu dụng, cùng những khuyến nghị hành động cụ thể cho doanh nghiệp; mà còn là đóng góp đáng quý vào bộ dữ liệu đối chuẩn đầu tiên về “Hệ cộng lực” (Workforce Plus) cho cộng đồng doanh nghiệp tại Việt Nam. Đây là những phép đo và biện pháp nhằm nâng cao năng lực thực thi tích hợp giữa con người, AI, tự động hóa và hệ sinh thái, qua đó hỗ trợ doanh nghiệp đáp ứng các kỳ vọng tăng trưởng trong bối cảnh mới.',
     'Theo lựa chọn không chia sẻ thông tin của Quý Anh/Chị khi tham gia khảo sát, Chương trình chỉ ghi nhận và xử lý phần dữ liệu khảo sát ở chế độ khuyết danh. Nếu muốn nhận báo cáo toàn phần, Anh/Chị vui lòng làm cả hai phần khảo sát và chọn "đồng ý" cho CEO Workforce Index xử lý thông tin cá nhân phục vụ mục đích của Chương trình.',
-    'Từ những thông tin Quý Anh/Chị đã chia sẻ, CWI xin trân trọng gửi Báo cáo kết quả khảo sát khuyết danh, nhằm hỗ trợ Anh/Chị có thêm góc nhìn về “Hệ cộng lực sẵn sàng cho tương lai” – một trong bốn chủ điểm chính của “Hệ cộng lực”.',
+    'Từ những thông tin Quý Anh/Chị đã chia sẻ, CWI xin trân trọng gửi Báo cáo kết quả khảo sát khuyết danh, nhằm hỗ trợ Anh/Chị có thêm góc nhìn về “{theme}” – một trong bốn chủ điểm chính của “Hệ cộng lực”.',
   ],
   listIntro: 'Vui lòng xem Báo cáo đính kèm trong email này. Với cam kết cao về tính độc lập và bảo mật thông tin, CWI hy vọng báo cáo sẽ hỗ trợ Anh/Chị:',
   listItems: [
@@ -74,7 +75,7 @@ const personalizedContentEn: ReportEmailContent = {
   paragraphs: [
     'On behalf of the CEO Workforce Index (CWI) Organizing Committee, I would like to sincerely thank you for taking the time to complete the survey in the first season of the CEO Workforce Index.',
     'Your participation not only provides practical, useful insights and specific action recommendations for your own company, but also makes a valuable contribution to the first benchmark dataset on "Workforce Plus" for the business community in Vietnam. These are the measures and actions to strengthen integrated execution capacity across people, AI, automation and the ecosystem, so that businesses in Vietnam can meet their growth expectations.',
-    'Based on the information you shared, CWI is pleased to send you a report dedicated to your business, to help you look deeper and take priority actions over the next 90 days on "Workforce Plus for Future Readiness" - one of the four main themes of "Workforce Plus".',
+    'Based on the information you shared, CWI is pleased to send you a report dedicated to your business, to help you look deeper and take priority actions over the next 90 days on "{theme}" - one of the four main themes of "Workforce Plus".',
   ],
   listIntro: 'Please find the report attached to this email. Prepared with a strong commitment to independence and information security, we hope it will help you:',
   listItems: [
@@ -97,7 +98,7 @@ const anonymousContentEn: ReportEmailContent = {
     'On behalf of the CEO Workforce Index (CWI) Organizing Committee, I would like to sincerely thank you for taking the time to complete the survey in the first season of the CEO Workforce Index.',
     'Your participation not only provides practical, useful insights and specific action recommendations for businesses, but also makes a valuable contribution to the first benchmark dataset on “Workforce Plus” for the business community in Vietnam. These are the measures and actions to strengthen integrated execution capacity across people, AI, automation and the ecosystem, helping businesses meet their growth expectations in a new context.',
     'As you chose not to share your information when taking the survey, the Program only records and processes your survey data in anonymous mode. To receive the full report, please complete both parts of the survey and agree to let CEO Workforce Index process your personal information for the purposes of the Program.',
-    'Based on the information you shared, CWI is pleased to send you the anonymous survey results report, to give you more perspective on “Workforce Plus for Future Readiness” – one of the four main themes of “Workforce Plus”.',
+    'Based on the information you shared, CWI is pleased to send you the anonymous survey results report, to give you more perspective on “{theme}” – one of the four main themes of “Workforce Plus”.',
   ],
   listIntro: 'Please find the report attached to this email. With a strong commitment to independence and information security, CWI hopes the report will help you:',
   listItems: [
@@ -206,9 +207,17 @@ function htmlContent(content: ReportEmailContent, language: SurveyLanguage) {
 </html>`
 }
 
-export function buildReportEmail(reportType: ReportEmailType = 'personalized', language: SurveyLanguage = 'vi'): BuiltReportEmail {
-  const content = language === 'en'
+// The paragraphs name the theme of the survey's quarter ("{theme}"); a submission
+// without a known quarter gets the newest one's.
+function withTheme(content: ReportEmailContent, theme: string): ReportEmailContent {
+  return { ...content, paragraphs: content.paragraphs.map((paragraph) => paragraph.replace('{theme}', theme)) }
+}
+
+export function buildReportEmail(reportType: ReportEmailType = 'personalized', language: SurveyLanguage = 'vi', surveyVersion?: string | null): BuiltReportEmail {
+  const edition = getSurveyEdition(surveyVersion) ?? getSurveyEdition(LATEST_SURVEY_VERSION)!
+  const base = language === 'en'
     ? (reportType === 'anonymous' ? anonymousContentEn : personalizedContentEn)
     : (reportType === 'anonymous' ? anonymousContent : personalizedContent)
+  const content = withTheme(base, edition.theme[language])
   return { html: htmlContent(content, language), subject: content.subject, text: textContent(content) }
 }

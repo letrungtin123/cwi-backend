@@ -70,7 +70,8 @@ export type SubmissionDetail = SubmissionListItem & {
 }
 
 export type SubmissionListFilters = {
-  before: Date | null
+  // Exact time (ISO, up to microseconds) of the last row of the previous page.
+  before: string | null
   beforeId: string | null
   emailStatus?: 'failed' | null
   limit: number
@@ -87,6 +88,8 @@ export type CursorPage<T> = {
   hasNextPage: boolean
   items: T[]
   nextCursor: string | null
+  // Rows matching the filters across all pages.
+  totalCount: number
 }
 
 export type SubmissionStats = {
@@ -137,7 +140,8 @@ export type RoundtableRegistrationDetail = RoundtableRegistrationListItem & {
 }
 
 export type RoundtableRegistrationFilters = {
-  before: Date | null
+  // Exact time (ISO, up to microseconds) of the last row of the previous page.
+  before: string | null
   beforeId: string | null
   limit: number
   linkStatus: RoundtableLinkStatus | null

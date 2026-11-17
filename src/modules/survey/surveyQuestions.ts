@@ -1,8 +1,7 @@
-// Question set of the current survey edition. Every stored submission records
-// SURVEY_VERSION so answers from earlier editions (2026Q3) stay distinguishable.
-// Question and option text must match the CWI AI V3 registry character for
-// character because the report service validates the transport payload.
-export const SURVEY_VERSION = '2026Q4'
+// Question set of the 2026Q4 edition, plus the types shared by every edition
+// (see surveyEditions.ts for the list of editions). Question and option text must
+// match the CWI AI V3 registry character for character because the report service
+// validates the transport payload.
 
 // Language the respondent saw the survey in. Answers are always stored in the
 // Vietnamese text below, whichever language was shown.
@@ -235,13 +234,3 @@ export const SURVEY_QUESTIONS = [
     type: 'text',
   },
 ] as const satisfies readonly SurveyQuestion[]
-
-export const PART_ONE_QUESTION_IDXS = SURVEY_QUESTIONS.filter((question) => question.part === 1).map(
-  (question) => question.idx,
-)
-
-export const ALL_QUESTION_IDXS = SURVEY_QUESTIONS.map((question) => question.idx)
-
-export const SURVEY_QUESTION_BY_IDX: ReadonlyMap<number, SurveyQuestion> = new Map(
-  SURVEY_QUESTIONS.map((question) => [question.idx, question]),
-)

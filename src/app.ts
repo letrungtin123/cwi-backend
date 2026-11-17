@@ -39,6 +39,8 @@ import type { WebinarService } from './modules/webinar/webinarService.js'
 import { createQuarterlyReportAdminRouter, createQuarterlyReportPublicRouter } from './modules/quarterlyReports/quarterlyReportRoutes.js'
 import type { QuarterlyReportDownloadTokenService } from './modules/quarterlyReports/quarterlyReportDownloadToken.js'
 import type { PgQuarterlyReportRepository } from './modules/quarterlyReports/quarterlyReportRepository.js'
+import { createSurveyQuarterAdminRouter, createSurveyQuarterPublicRouter } from './modules/surveyQuarters/surveyQuarterRoutes.js'
+import type { PgSurveyQuarterRepository } from './modules/surveyQuarters/surveyQuarterRepository.js'
 
 export type AppDependencies = {
   adminRepository: PgAdminRepository
@@ -57,6 +59,8 @@ export type AppDependencies = {
   quarterlyReportRepository: PgQuarterlyReportRepository
   quarterlyReportStorage: ReportAssetStorage
   roundtableService: RoundtableService
+  surveyQuarterImageStorage: ReportAssetStorage
+  surveyQuarterRepository: PgSurveyQuarterRepository
   surveyService: SurveyService
   webinarService: WebinarService
 }
@@ -133,6 +137,11 @@ function maskTokensInUrl(url: string | undefined) {
 // Accept a caller's request id only if it looks like one; otherwise make our own.
 const requestIdPattern = /^[A-Za-z0-9._-]{8,80}$/
 
+// The survey's quarter cards: the list and the card images are read on every visit to /survey
+// (three requests), so they get their own, wider limit instead of using up the one that guards
+// survey submissions for everybody behind the same office IP.
+const SURVEY_QUARTER_READS_PER_MINUTE = 600
+
 // Requests to the admin API before login are not covered by the per-session admin limit, and each one
 // still costs a session lookup; cap them per client IP. Generous enough for several admins working
 // behind one office IP while the dashboard refreshes itself.
@@ -167,7 +176,7 @@ function noStore(res: Response) {
 }
 
 export function createApp(dependencies: AppDependencies) {
-  const { adminRepository, authService, config, exportRepository, logger, pool, quarterlyReportDownloadTokenService, quarterlyReportRepository, quarterlyReportStorage, reportAccessTokenService, reportAssetStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, submissionReportStorage, surveyService, webinarService } = dependencies
+  const { adminRepository, authService, config, exportRepository, logger, pool, quarterlyReportDownloadTokenService, quarterlyReportRepository, quarterlyReportStorage, reportAccessTokenService, reportAssetStorage, reportDeliveryRepository, reportMailer, reportRepository, roundtableService, submissionReportStorage, surveyQuarterImageStorage, surveyQuarterRepository, surveyService, webinarService } = dependencies
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', config.trustProxy)
@@ -178,7 +187,7 @@ export function createApp(dependencies: AppDependencies) {
   app.use(rateLimit({
     legacyHeaders: false,
     limit: config.rateLimitMax,
-    skip: (req) => req.path === '/api/v1/auth/me' || req.path.startsWith('/api/v1/admin/'),
+    skip: (req) => req.path === '/api/v1/auth/me' || req.path.startsWith('/api/v1/admin/') || req.path.startsWith('/api/v1/public/survey-quarters'),
     standardHeaders: 'draft-7',
     windowMs: config.rateLimitWindowMs,
   }))
@@ -211,6 +220,13 @@ export function createApp(dependencies: AppDependencies) {
   app.use('/api/v1/webinar-registrations', createWebinarRouter(webinarService, config))
   app.use('/api/v1/survey-submissions', createSurveyRouter(surveyService, config))
   app.use('/api/v1/public/quarterly-reports', createQuarterlyReportPublicRouter(quarterlyReportRepository, quarterlyReportStorage, quarterlyReportDownloadTokenService, config))
+  app.use('/api/v1/public/survey-quarters', rateLimit({
+    legacyHeaders: false,
+    limit: SURVEY_QUARTER_READS_PER_MINUTE,
+    standardHeaders: 'draft-7',
+    windowMs: 60_000,
+  }))
+  app.use('/api/v1/public/survey-quarters', createSurveyQuarterPublicRouter(surveyQuarterRepository, surveyQuarterImageStorage))
   app.use('/api/v1/public', createPublicReportRouter(reportRepository, reportAssetStorage, reportAccessTokenService))
   app.use('/api/v1/admin', createAdminRouter(adminRepository, reportRepository, reportAssetStorage, exportRepository, authService, config))
   app.use('/api/v1/admin/report-delivery', createReportDeliveryRouter(reportDeliveryRepository, submissionReportStorage, reportAssetStorage, reportMailer, authService, config))
@@ -219,6 +235,7 @@ export function createApp(dependencies: AppDependencies) {
   app.use('/api/v1/admin/report-generation-settings', createReportGenerationSettingsAdminRouter(reportRepository, authService, config))
   app.use('/api/v1/admin/admin-users', createAdminUserRouter(new AdminUserService(new PgAdminUserRepository(pool), config.auth), authService, config))
   app.use('/api/v1/admin/submission-deletions', createSubmissionDeletionRouter(new PgSubmissionDeletionRepository(pool), authService, config))
+  app.use('/api/v1/admin/survey-quarters', createSurveyQuarterAdminRouter(surveyQuarterRepository, reportRepository, surveyQuarterImageStorage, authService, config))
   app.use('/api/v1/admin/survey-sources', createSurveySourceAdminRouter(new PgSurveySourceRepository(pool), authService, config))
   app.use(handleNotFound)
   app.use(handleError(logger))
