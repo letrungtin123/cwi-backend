@@ -21,6 +21,8 @@ export type SurveySource = {
   note: string | null
   // Submissions in the selected survey quarter (all quarters when none is selected).
   submissionCount: number
+  // Submissions per survey quarter, e.g. { "2026Q3": 2, "2026Q4": 5 }.
+  submissionCountsByVersion: Record<string, number>
   // Submissions in every quarter; a source can only be deleted while this is 0.
   totalSubmissionCount: number
   updatedAt: string
@@ -31,6 +33,7 @@ export type SurveySourceList = {
   items: SurveySource[]
   // Submissions in the same quarter that came with no source link.
   unattributedSubmissions: number
+  unattributedByVersion: Record<string, number>
 }
 
 export type SurveySourceCreate = {
@@ -56,6 +59,7 @@ type SurveySourceRow = {
   name: string
   note: string | null
   submission_count: number
+  submission_counts_by_version: Record<string, number> | null
   total_submission_count: number
   updated_at: Date
   updated_by_email: string | null
@@ -88,7 +92,16 @@ const sourceSelect = `
       SELECT count(*)::int
       FROM public.cwi_survey_submissions AS every_submission
       WHERE every_submission.survey_source_id = source.id
-    ) AS total_submission_count
+    ) AS total_submission_count,
+    (
+      SELECT jsonb_object_agg(per_version.survey_version, per_version.total)
+      FROM (
+        SELECT version_submission.survey_version, count(*)::int AS total
+        FROM public.cwi_survey_submissions AS version_submission
+        WHERE version_submission.survey_source_id = source.id
+        GROUP BY version_submission.survey_version
+      ) AS per_version
+    ) AS submission_counts_by_version
   FROM public.cwi_survey_sources AS source
   LEFT JOIN public.cwi_admin_users AS creator ON creator.id = source.created_by_admin_id
   LEFT JOIN public.cwi_admin_users AS updater ON updater.id = source.updated_by_admin_id
@@ -114,6 +127,7 @@ function mapSource(row: SurveySourceRow): SurveySource {
     name: row.name,
     note: row.note,
     submissionCount: row.submission_count,
+    submissionCountsByVersion: row.submission_counts_by_version ?? {},
     totalSubmissionCount: row.total_submission_count,
     updatedAt: row.updated_at.toISOString(),
     updatedBy: person(row.updated_by_name, row.updated_by_email),
@@ -149,7 +163,7 @@ export class PgSurveySourceRepository {
   constructor(private readonly pool: pg.Pool) {}
 
   async list(surveyVersion: string | null): Promise<SurveySourceList> {
-    const [sources, unattributed] = await Promise.all([
+    const [sources, unattributed, unattributedByVersion] = await Promise.all([
       this.pool.query<SurveySourceRow>(
         `${sourceSelect}
         ${sourceGroupBy}
@@ -163,9 +177,16 @@ export class PgSurveySourceRepository {
           AND ($1::text IS NULL OR survey_version = $1)`,
         [surveyVersion],
       ),
+      this.pool.query<{ survey_version: string; total: number }>(
+        `SELECT survey_version, count(*)::int AS total
+        FROM public.cwi_survey_submissions
+        WHERE survey_source_id IS NULL
+        GROUP BY survey_version`,
+      ),
     ])
     return {
       items: sources.rows.map(mapSource),
+      unattributedByVersion: Object.fromEntries(unattributedByVersion.rows.map((row) => [row.survey_version, row.total])),
       unattributedSubmissions: unattributed.rows[0]?.total ?? 0,
     }
   }

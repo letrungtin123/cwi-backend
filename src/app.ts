@@ -59,6 +59,7 @@ export type AppDependencies = {
   quarterlyReportRepository: PgQuarterlyReportRepository
   quarterlyReportStorage: ReportAssetStorage
   roundtableService: RoundtableService
+  // Card images of the survey quarters and of the quarterly reports (quarterly-reports/).
   surveyQuarterImageStorage: ReportAssetStorage
   surveyQuarterRepository: PgSurveyQuarterRepository
   surveyService: SurveyService
@@ -137,10 +138,12 @@ function maskTokensInUrl(url: string | undefined) {
 // Accept a caller's request id only if it looks like one; otherwise make our own.
 const requestIdPattern = /^[A-Za-z0-9._-]{8,80}$/
 
-// The survey's quarter cards: the list and the card images are read on every visit to /survey
-// (three requests), so they get their own, wider limit instead of using up the one that guards
-// survey submissions for everybody behind the same office IP.
-const SURVEY_QUARTER_READS_PER_MINUTE = 600
+// The quarter cards of /survey and /bao-cao-quy: the list and the card images are read on every
+// visit (and a report PDF in many small range requests), so they get their own, wider limit
+// instead of using up the one that guards survey submissions for everybody behind the same
+// office IP. Report download requests keep their own 20 per minute.
+const CARD_PAGE_READS_PER_MINUTE = 600
+const cardPagePaths = ['/api/v1/public/survey-quarters', '/api/v1/public/quarterly-reports']
 
 // Requests to the admin API before login are not covered by the per-session admin limit, and each one
 // still costs a session lookup; cap them per client IP. Generous enough for several admins working
@@ -187,7 +190,7 @@ export function createApp(dependencies: AppDependencies) {
   app.use(rateLimit({
     legacyHeaders: false,
     limit: config.rateLimitMax,
-    skip: (req) => req.path === '/api/v1/auth/me' || req.path.startsWith('/api/v1/admin/') || req.path.startsWith('/api/v1/public/survey-quarters'),
+    skip: (req) => req.path === '/api/v1/auth/me' || req.path.startsWith('/api/v1/admin/') || cardPagePaths.some((path) => req.path.startsWith(path)),
     standardHeaders: 'draft-7',
     windowMs: config.rateLimitWindowMs,
   }))
@@ -219,18 +222,18 @@ export function createApp(dependencies: AppDependencies) {
   app.use('/api/v1/roundtable-registrations', createRoundtableRouter(roundtableService, config))
   app.use('/api/v1/webinar-registrations', createWebinarRouter(webinarService, config))
   app.use('/api/v1/survey-submissions', createSurveyRouter(surveyService, config))
-  app.use('/api/v1/public/quarterly-reports', createQuarterlyReportPublicRouter(quarterlyReportRepository, quarterlyReportStorage, quarterlyReportDownloadTokenService, config))
-  app.use('/api/v1/public/survey-quarters', rateLimit({
+  app.use(cardPagePaths, rateLimit({
     legacyHeaders: false,
-    limit: SURVEY_QUARTER_READS_PER_MINUTE,
+    limit: CARD_PAGE_READS_PER_MINUTE,
     standardHeaders: 'draft-7',
     windowMs: 60_000,
   }))
+  app.use('/api/v1/public/quarterly-reports', createQuarterlyReportPublicRouter(quarterlyReportRepository, quarterlyReportStorage, surveyQuarterImageStorage, quarterlyReportDownloadTokenService, config))
   app.use('/api/v1/public/survey-quarters', createSurveyQuarterPublicRouter(surveyQuarterRepository, surveyQuarterImageStorage))
   app.use('/api/v1/public', createPublicReportRouter(reportRepository, reportAssetStorage, reportAccessTokenService))
   app.use('/api/v1/admin', createAdminRouter(adminRepository, reportRepository, reportAssetStorage, exportRepository, authService, config))
   app.use('/api/v1/admin/report-delivery', createReportDeliveryRouter(reportDeliveryRepository, submissionReportStorage, reportAssetStorage, reportMailer, authService, config))
-  app.use('/api/v1/admin/quarterly-reports', createQuarterlyReportAdminRouter(quarterlyReportRepository, quarterlyReportStorage, authService, config))
+  app.use('/api/v1/admin/quarterly-reports', createQuarterlyReportAdminRouter(quarterlyReportRepository, quarterlyReportStorage, surveyQuarterImageStorage, authService, config))
   app.use('/api/v1/admin/roundtable-event', createRoundtableEventAdminRouter(roundtableService, authService, config))
   app.use('/api/v1/admin/report-generation-settings', createReportGenerationSettingsAdminRouter(reportRepository, authService, config))
   app.use('/api/v1/admin/admin-users', createAdminUserRouter(new AdminUserService(new PgAdminUserRepository(pool), config.auth), authService, config))
