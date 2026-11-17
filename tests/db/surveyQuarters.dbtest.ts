@@ -113,6 +113,22 @@ describe.skipIf(!reachable)('survey quarters on the local database (rolled back)
     expect((await reports.claimNextReadyJob('db-test-worker', 300000, 3))?.id).toBe(q3.reportJob?.id)
   })
 
+  it('does not let reports already at cwi-ai for a turned-off quarter block the other quarter', async () => {
+    const sent = [await submit('2026Q4'), await submit('2026Q4'), await submit('2026Q4')]
+    await db.pool.query(
+      `UPDATE public.cwi_report_jobs SET status = 'queued_ai', next_poll_at = now() + interval '1 hour' WHERE id = ANY($1::uuid[])`,
+      [sent.map((created) => created.reportJob!.id)],
+    )
+    const q3 = await submit('2026Q3')
+
+    // Quarter 4 on: its three reports at cwi-ai fill the limit of 3, so the new one waits.
+    expect(await reports.claimNextReadyJob('db-test-worker', 300000, 3)).toBeNull()
+
+    // Quarter 4 off: its reports stay untouched and no longer count against the limit.
+    await quarters.update('2026Q4', quarterInput(await quarters.get('2026Q4'), { reportGenerationEnabled: false }), actor)
+    expect((await reports.claimNextReadyJob('db-test-worker', 300000, 3))?.id).toBe(q3.reportJob?.id)
+  })
+
   it('applies the global stop from .env to every quarter', async () => {
     expect(await reports.syncGlobalPause(true)).toBe(true)
     expect(await reports.syncGlobalPause(true)).toBe(false)
@@ -138,8 +154,10 @@ describe.skipIf(!reachable)('survey quarters on the local database (rolled back)
 
   it('sets and clears a card image, returning the previous one', async () => {
     const image = { contentType: 'image/png', sha256: 'b'.repeat(64), storagePath: 'quarters/2026Q4/test.png' }
+    // The local database may already hold an image uploaded while trying the dashboard.
+    const existing = (await quarters.get('2026Q4')).image
     const first = await quarters.setImage('2026Q4', image, actor)
-    expect(first.previous).toBeNull()
+    expect(first.previous).toEqual(existing)
     expect(first.quarter.image).toEqual(image)
     const cleared = await quarters.setImage('2026Q4', null, actor)
     expect(cleared.previous).toEqual(image)

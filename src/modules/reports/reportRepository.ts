@@ -351,7 +351,16 @@ export class PgReportRepository {
           AND (locked_at IS NULL OR locked_at < now() - ($2::double precision * interval '1 millisecond'))
           AND (
             status <> 'pending'
-            OR (SELECT count(*) FROM public.cwi_report_jobs AS in_flight WHERE in_flight.status = ANY($4::text[])) < $5
+            -- Reports already at cwi-ai for a quarter that is turned off are left untouched,
+            -- so they must not use up the limit and block the quarters that are on.
+            OR (
+              SELECT count(*)
+              FROM public.cwi_report_jobs AS in_flight
+              LEFT JOIN public.cwi_survey_submissions AS in_flight_submission ON in_flight_submission.id = in_flight.submission_id
+              LEFT JOIN public.cwi_survey_quarters AS in_flight_quarter ON in_flight_quarter.survey_version = in_flight_submission.survey_version
+              WHERE in_flight.status = ANY($4::text[])
+                AND COALESCE(in_flight_quarter.report_generation_enabled, true)
+            ) < $5
           )
           -- A quarter turned off in the dashboard keeps its jobs waiting (none processed).
           AND COALESCE((
