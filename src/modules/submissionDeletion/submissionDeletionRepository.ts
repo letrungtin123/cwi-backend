@@ -5,13 +5,23 @@ import { writeAdminAudit, type AuditActor } from '../audit/adminAuditLog.js'
 
 export const SUBMISSION_AUDIT_TARGET = 'survey_submission'
 
-// A submission may be deleted (by a super admin, to remove test rows) only while
-// its report is "Chờ tạo báo cáo": report creation is paused in the dashboard, it
-// has a report job that never started (no AI call, no HTML/PDF), and it has no
-// uploaded report file and no report email. Anything with a real report stays.
-export function submissionDeletableSql(alias: string) {
+// Report creation is paused for this submission: the global switch is off, or the
+// switch of the submission's survey quarter is off. Same rule as the "Chờ tạo báo cáo"
+// label in the dashboard (adminQueries.ts) and as the report worker.
+export function reportGenerationPausedSql(alias: string) {
   return `(
     COALESCE((SELECT NOT settings.ai_calls_enabled FROM public.cwi_report_generation_settings AS settings WHERE settings.id), false)
+    OR COALESCE((SELECT NOT quarter.report_generation_enabled FROM public.cwi_survey_quarters AS quarter WHERE quarter.survey_version = ${alias}.survey_version), false)
+  )`
+}
+
+// A submission may be deleted (by a super admin, to remove test rows) only while
+// its report is "Chờ tạo báo cáo": report creation is paused for its quarter, it
+// has a report job that never started (never sent to cwi-ai, no HTML/PDF), and it
+// has no uploaded report file and no report email. Anything with a real report stays.
+export function submissionDeletableSql(alias: string) {
+  return `(
+    ${reportGenerationPausedSql(alias)}
     AND EXISTS (SELECT 1 FROM public.cwi_report_jobs AS waiting_job WHERE waiting_job.submission_id = ${alias}.id)
     AND NOT EXISTS (
       SELECT 1
@@ -108,18 +118,23 @@ export class PgSubmissionDeletionRepository {
   }
 
   // All or nothing: if any selected submission cannot be deleted any more (for
-  // example report creation was switched back on), nothing is deleted. Each
-  // deleted submission leaves one audit row with who it was and when it was sent;
-  // its answers, waiting report job and Roundtable/Webinar registrations go with it.
+  // example report creation was switched back on for its quarter), nothing is
+  // deleted. Each deleted submission leaves one audit row with who it was and when
+  // it was sent; its answers, waiting report job and Roundtable/Webinar
+  // registrations go with it.
   async delete(ids: string[], actor: AuditActor): Promise<{ deleted: number }> {
     return withTransaction(this.pool, async (client) => {
-      // Holding the settings row keeps report creation from being switched on meanwhile.
-      const settings = await client.query<{ ai_calls_enabled: boolean }>(
-        'SELECT ai_calls_enabled FROM public.cwi_report_generation_settings WHERE id FOR UPDATE',
+      // Holding the global switch and the quarter switches of the selected submissions
+      // keeps report creation from being switched on for them meanwhile.
+      await client.query('SELECT id FROM public.cwi_report_generation_settings WHERE id FOR UPDATE')
+      await client.query(
+        `SELECT quarter.id
+        FROM public.cwi_survey_quarters AS quarter
+        WHERE quarter.survey_version IN (SELECT s.survey_version FROM public.cwi_survey_submissions AS s WHERE s.id = ANY($1::uuid[]))
+        ORDER BY quarter.survey_version
+        FOR UPDATE`,
+        [ids],
       )
-      if (settings.rows[0]?.ai_calls_enabled !== false) {
-        throw new HttpError(409, 'report_generation_running', 'Chỉ xóa được khi đang tạm dừng tạo báo cáo. Vui lòng tải lại trang.')
-      }
       await client.query('SELECT id FROM public.cwi_survey_submissions WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE', [ids])
       await client.query('SELECT id FROM public.cwi_report_jobs WHERE submission_id = ANY($1::uuid[]) ORDER BY id FOR UPDATE', [ids])
 

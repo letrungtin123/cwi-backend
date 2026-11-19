@@ -112,6 +112,9 @@ describe('deleting waiting submissions', () => {
     const { submissionDeletableSql } = await import('../src/modules/submissionDeletion/submissionDeletionRepository.js')
     const sql = submissionDeletableSql('s')
     expect(sql).toContain('NOT settings.ai_calls_enabled')
+    // The quarter switch counts too: since the per-quarter switches the global one stays on.
+    expect(sql).toContain('NOT quarter.report_generation_enabled')
+    expect(sql).toContain('quarter.survey_version = s.survey_version')
     expect(sql).toContain("status NOT IN ('pending', 'queued')")
     expect(sql).toContain('pdf_storage_path IS NOT NULL')
     expect(sql).toContain('cwi_submission_report_files')
