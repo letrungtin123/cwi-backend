@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable, pipeline } from 'node:stream'
 
@@ -193,6 +193,142 @@ async function serveApp(req, res, root, strippedPath) {
   else res.end()
 }
 
+// ---- News pages (/tin-tuc) ----------------------------------------------------------
+// Link previews (Facebook, Zalo, LinkedIn) and search engines read the HTML without running
+// the page's scripts, so the server writes each news page's own title, description and
+// picture into <head>. An old link of a post answers 301 to its current link, keeping the
+// query (utm_* of running ads). If the API does not answer quickly, the plain page is served.
+
+const NEWS_PATH = /^\/tin-tuc(?:\/|$)/
+const NEWS_META_TIMEOUT_MS = 1500
+const FALLBACK_ORIGIN = 'https://ceo-workforce-index.com'
+let landingIndexCache = null
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])
+}
+
+// The site's own address as the visitor used it, for absolute links in previews.
+function publicOrigin(req) {
+  const forwardedHost = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '').split(',')[0].trim()
+  if (!/^[a-z0-9.-]+(?::\d{1,5})?$/i.test(forwardedHost)) return FALLBACK_ORIGIN
+  const forwardedProto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim()
+  const local = /^(localhost|127\.0\.0\.1)(:|$)/.test(forwardedHost)
+  const proto = forwardedProto === 'http' || forwardedProto === 'https' ? forwardedProto : local ? 'http' : 'https'
+  return `${proto}://${forwardedHost}`
+}
+
+async function landingIndexHtml() {
+  const filePath = path.join(landingRoot, 'index.html')
+  const fileStat = await stat(filePath)
+  if (!landingIndexCache || landingIndexCache.mtimeMs !== fileStat.mtimeMs) {
+    landingIndexCache = { html: await readFile(filePath, 'utf8'), mtimeMs: fileStat.mtimeMs }
+  }
+  return landingIndexCache.html
+}
+
+async function fetchNewsMeta(url) {
+  const target = new URL('/api/v1/public/news/meta', apiBaseUrl)
+  target.searchParams.set('path', url.pathname)
+  target.searchParams.set('lang', url.searchParams.get('lang') === 'en' ? 'en' : 'vi')
+  try {
+    const response = await fetch(target, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(NEWS_META_TIMEOUT_MS) })
+    if (!response.ok) return null
+    const payload = await response.json()
+    return payload?.data ?? null
+  } catch {
+    return null
+  }
+}
+
+function metaPattern(attribute, name) {
+  const escaped = name.replace(/[.:]/g, '\\$&')
+  return new RegExp(`<meta\\s+${attribute}="${escaped}"\\s+content="[^"]*"\\s*/?>`)
+}
+
+function replaceTag(html, pattern, tag) {
+  return pattern.test(html) ? html.replace(pattern, tag) : html.replace('</head>', `  ${tag}\n  </head>`)
+}
+
+function newsHead(html, meta, origin, language) {
+  const canonical = `${origin}${meta.canonicalPath}${language === 'en' ? '?lang=en' : ''}`
+  const image = meta.image ? `${origin}${meta.image}` : `${origin}/og-image.jpg`
+  const title = escapeHtml(meta.title)
+  const description = escapeHtml(meta.description)
+  let out = html.replace(/<title>[^<]*<\/title>/, `<title>${title}</title>`)
+  out = replaceTag(out, metaPattern('name', 'description'), `<meta name="description" content="${description}" />`)
+  out = replaceTag(out, metaPattern('property', 'og:type'), `<meta property="og:type" content="${meta.type === 'article' ? 'article' : 'website'}" />`)
+  out = replaceTag(out, metaPattern('property', 'og:locale'), `<meta property="og:locale" content="${language === 'en' ? 'en_US' : 'vi_VN'}" />`)
+  out = replaceTag(out, metaPattern('property', 'og:title'), `<meta property="og:title" content="${title}" />`)
+  out = replaceTag(out, metaPattern('property', 'og:description'), `<meta property="og:description" content="${description}" />`)
+  out = replaceTag(out, metaPattern('property', 'og:image'), `<meta property="og:image" content="${escapeHtml(image)}" />`)
+  out = replaceTag(out, metaPattern('property', 'og:image:alt'), `<meta property="og:image:alt" content="${escapeHtml(meta.imageAlt || meta.title)}" />`)
+  if (meta.image) {
+    // A post's picture has its own size; the fixed 1200x630 belongs to the site's default picture.
+    out = out.replace(metaPattern('property', 'og:image:width'), '').replace(metaPattern('property', 'og:image:height'), '')
+  }
+  out = replaceTag(out, metaPattern('property', 'og:url'), `<meta property="og:url" content="${escapeHtml(canonical)}" />`)
+  out = replaceTag(out, /<link\s+rel="canonical"\s+href="[^"]*"\s*\/?>/, `<link rel="canonical" href="${escapeHtml(canonical)}" />`)
+  if (meta.type === 'article' && meta.publishedAt) {
+    out = replaceTag(out, metaPattern('property', 'article:published_time'), `<meta property="article:published_time" content="${escapeHtml(meta.publishedAt)}" />`)
+  }
+  if (language === 'en') out = out.replace('<html lang="vi">', '<html lang="en">')
+  return out
+}
+
+async function serveNewsPage(req, res, url) {
+  const meta = await fetchNewsMeta(url)
+  if (meta?.redirect && /^\/tin-tuc\/[a-z0-9-]+$/.test(meta.redirect)) {
+    res.writeHead(301, { ...staticSecurityHeaders, 'cache-control': 'no-cache', location: `${meta.redirect}${url.search}` })
+    res.end()
+    return
+  }
+  if (!meta?.title) {
+    await serveApp(req, res, landingRoot, url.pathname)
+    return
+  }
+  const language = url.searchParams.get('lang') === 'en' ? 'en' : 'vi'
+  const body = Buffer.from(newsHead(await landingIndexHtml(), meta, publicOrigin(req), language), 'utf8')
+  res.writeHead(meta.status === 404 ? 404 : 200, {
+    ...staticSecurityHeaders,
+    'cache-control': 'no-cache',
+    'content-length': String(body.length),
+    'content-type': 'text/html; charset=utf-8',
+    'x-content-type-options': 'nosniff',
+  })
+  res.end(req.method === 'HEAD' ? undefined : body)
+}
+
+// /sitemap.xml: the landing pages and every public news post and category, for search engines.
+async function serveSitemap(req, res) {
+  const origin = publicOrigin(req)
+  let news = { categories: [], posts: [] }
+  try {
+    const response = await fetch(new URL('/api/v1/public/news/sitemap', apiBaseUrl), { signal: AbortSignal.timeout(3000) })
+    if (response.ok) news = (await response.json())?.data ?? news
+  } catch {
+    // The landing pages are still listed.
+  }
+  const entry = (pathname, lastmod) => `  <url><loc>${escapeHtml(origin + pathname)}</loc>${lastmod ? `<lastmod>${escapeHtml(lastmod.slice(0, 10))}</lastmod>` : ''}</url>`
+  const urls = [
+    entry('/'),
+    entry('/survey'),
+    entry('/bao-cao-quy'),
+    entry('/tin-tuc'),
+    ...news.categories.map((category) => entry(`/tin-tuc/chuyen-muc/${category.slug}`, category.updatedAt)),
+    ...news.posts.map((post) => entry(`/tin-tuc/${post.slug}`, post.updatedAt)),
+  ]
+  const body = Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>\n`, 'utf8')
+  res.writeHead(200, { 'cache-control': 'public, max-age=600', 'content-length': String(body.length), 'content-type': 'application/xml; charset=utf-8', 'x-content-type-options': 'nosniff' })
+  res.end(req.method === 'HEAD' ? undefined : body)
+}
+
+function serveRobots(req, res) {
+  const body = Buffer.from(`User-agent: *\nAllow: /\nDisallow: /dashboard/\n\nSitemap: ${publicOrigin(req)}/sitemap.xml\n`, 'utf8')
+  res.writeHead(200, { 'cache-control': 'public, max-age=3600', 'content-length': String(body.length), 'content-type': 'text/plain; charset=utf-8' })
+  res.end(req.method === 'HEAD' ? undefined : body)
+}
+
 createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? '/', 'http://localhost')
@@ -216,6 +352,12 @@ createServer(async (req, res) => {
     if (url.pathname.startsWith('/dashboard/')) {
       await serveApp(req, res, dashboardRoot, url.pathname.slice('/dashboard'.length))
       return
+    }
+
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      if (url.pathname === '/sitemap.xml') return await serveSitemap(req, res)
+      if (url.pathname === '/robots.txt') return serveRobots(req, res)
+      if (NEWS_PATH.test(url.pathname)) return await serveNewsPage(req, res, url)
     }
 
     await serveApp(req, res, landingRoot, url.pathname)

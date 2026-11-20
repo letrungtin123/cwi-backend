@@ -40,6 +40,8 @@ import { createQuarterlyReportAdminRouter, createQuarterlyReportPublicRouter } f
 import type { QuarterlyReportDownloadTokenService } from './modules/quarterlyReports/quarterlyReportDownloadToken.js'
 import type { PgQuarterlyReportRepository } from './modules/quarterlyReports/quarterlyReportRepository.js'
 import { createSurveyQuarterAdminRouter, createSurveyQuarterPublicRouter } from './modules/surveyQuarters/surveyQuarterRoutes.js'
+import { PgNewsRepository } from './modules/news/newsRepository.js'
+import { createNewsAdminRouter, createNewsPublicRouter } from './modules/news/newsRoutes.js'
 import type { PgSurveyQuarterRepository } from './modules/surveyQuarters/surveyQuarterRepository.js'
 
 export type AppDependencies = {
@@ -59,7 +61,8 @@ export type AppDependencies = {
   quarterlyReportRepository: PgQuarterlyReportRepository
   quarterlyReportStorage: ReportAssetStorage
   roundtableService: RoundtableService
-  // Card images of the survey quarters and of the quarterly reports (quarterly-reports/).
+  // Card images of the survey quarters, of the quarterly reports (quarterly-reports/) and the
+  // pictures of news posts (news/).
   surveyQuarterImageStorage: ReportAssetStorage
   surveyQuarterRepository: PgSurveyQuarterRepository
   surveyService: SurveyService
@@ -143,7 +146,10 @@ const requestIdPattern = /^[A-Za-z0-9._-]{8,80}$/
 // instead of using up the one that guards survey submissions for everybody behind the same
 // office IP. Report download requests keep their own 20 per minute.
 const CARD_PAGE_READS_PER_MINUTE = 600
-const cardPagePaths = ['/api/v1/public/survey-quarters', '/api/v1/public/quarterly-reports']
+// The news pages (/tin-tuc) are read the same way, and are where ads send visitors.
+const cardPagePaths = ['/api/v1/public/survey-quarters', '/api/v1/public/quarterly-reports', '/api/v1/public/news']
+// A news post carries its body in two languages; it may be larger than other requests.
+const NEWS_POST_BODY_LIMIT = '2mb'
 
 // Requests to the admin API before login are not covered by the per-session admin limit, and each one
 // still costs a session lookup; cap them per client IP. Generous enough for several admins working
@@ -200,6 +206,7 @@ export function createApp(dependencies: AppDependencies) {
     standardHeaders: 'draft-7',
     windowMs: 60_000,
   }))
+  app.use('/api/v1/admin/news/posts', express.json({ limit: NEWS_POST_BODY_LIMIT }))
   app.use(express.json({ limit: config.requestBodyLimit }))
 
   const liveness = (_req: Request, res: Response) => {
@@ -230,6 +237,8 @@ export function createApp(dependencies: AppDependencies) {
   }))
   app.use('/api/v1/public/quarterly-reports', createQuarterlyReportPublicRouter(quarterlyReportRepository, quarterlyReportStorage, surveyQuarterImageStorage, quarterlyReportDownloadTokenService, config))
   app.use('/api/v1/public/survey-quarters', createSurveyQuarterPublicRouter(surveyQuarterRepository, surveyQuarterImageStorage))
+  const newsRepository = new PgNewsRepository(pool)
+  app.use('/api/v1/public/news', createNewsPublicRouter(newsRepository, surveyQuarterImageStorage))
   app.use('/api/v1/public', createPublicReportRouter(reportRepository, reportAssetStorage, reportAccessTokenService))
   app.use('/api/v1/admin', createAdminRouter(adminRepository, reportRepository, reportAssetStorage, exportRepository, authService, config))
   app.use('/api/v1/admin/report-delivery', createReportDeliveryRouter(reportDeliveryRepository, submissionReportStorage, reportAssetStorage, reportMailer, authService, config))
@@ -240,6 +249,7 @@ export function createApp(dependencies: AppDependencies) {
   app.use('/api/v1/admin/submission-deletions', createSubmissionDeletionRouter(new PgSubmissionDeletionRepository(pool), authService, config))
   app.use('/api/v1/admin/survey-quarters', createSurveyQuarterAdminRouter(surveyQuarterRepository, reportRepository, surveyQuarterImageStorage, authService, config))
   app.use('/api/v1/admin/survey-sources', createSurveySourceAdminRouter(new PgSurveySourceRepository(pool), authService, config))
+  app.use('/api/v1/admin/news', createNewsAdminRouter(newsRepository, surveyQuarterImageStorage, authService, config))
   app.use(handleNotFound)
   app.use(handleError(logger))
   return app
