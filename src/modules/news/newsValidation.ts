@@ -172,18 +172,79 @@ export function newsLanguageLabel(language: NewsLanguage) {
   return languageLabels[language]
 }
 
-// "Tin tức" -> "Cài đặt": which share buttons every post page shows.
-export const NEWS_SHARE_BUTTONS = ['facebook', 'linkedin', 'copyLink', 'native'] as const
-export type NewsShareButton = (typeof NEWS_SHARE_BUTTONS)[number]
-export type NewsShareSettings = Record<NewsShareButton, boolean>
-export const DEFAULT_NEWS_SHARE_SETTINGS: NewsShareSettings = { copyLink: true, facebook: true, linkedin: true, native: true }
+// "Tin tức" -> "Cài đặt": the icons beside every post. Each network icon opens CWI's own
+// page there (shown once it has a link and is switched on); the copy-link icon copies the
+// post's address.
+export const NEWS_SOCIAL_NETWORKS = ['facebook', 'linkedin', 'youtube', 'zalo'] as const
+export type NewsSocialNetwork = (typeof NEWS_SOCIAL_NETWORKS)[number]
+export type NewsSocialLink = { on: boolean; url: string }
+export type NewsPageSettings = { copyLink: boolean; social: Record<NewsSocialNetwork, NewsSocialLink> }
 
-const shareSettingsSchema = z.object({
-  share: z.object({ copyLink: z.boolean(), facebook: z.boolean(), linkedin: z.boolean(), native: z.boolean() }).strict(),
+export const DEFAULT_NEWS_PAGE_SETTINGS: NewsPageSettings = {
+  copyLink: true,
+  social: { facebook: { on: false, url: '' }, linkedin: { on: false, url: '' }, youtube: { on: false, url: '' }, zalo: { on: false, url: '' } },
+}
+
+// The same list is in the dashboard (src/features/news/newsSocial.ts).
+const SOCIAL_SITES: Record<NewsSocialNetwork, { example: string; hosts: string[]; label: string }> = {
+  facebook: { example: 'https://www.facebook.com/tentrang', hosts: ['facebook.com', 'fb.com', 'fb.me'], label: 'Facebook' },
+  linkedin: { example: 'https://www.linkedin.com/company/tencongty', hosts: ['linkedin.com', 'lnkd.in'], label: 'LinkedIn' },
+  youtube: { example: 'https://www.youtube.com/@tenkenh', hosts: ['youtube.com', 'youtu.be'], label: 'YouTube' },
+  zalo: { example: 'https://zalo.me/1234567890', hosts: ['zalo.me'], label: 'Zalo OA' },
+}
+
+export const NEWS_SOCIAL_URL_MAX = 500
+
+// A pasted page link -> its https address, or null when it is not a page on that network
+// ("facebook.com/cwi" -> "https://facebook.com/cwi"; the network's home page alone is refused).
+export function normalizeNewsSocialUrl(network: NewsSocialNetwork, value: string): string | null {
+  const raw = value.trim()
+  if (!raw) return ''
+  let url: URL
+  try {
+    url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`)
+  } catch {
+    return null
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
+  if (url.username || url.password) return null
+  const host = url.hostname.toLowerCase()
+  if (!SOCIAL_SITES[network].hosts.some((site) => host === site || host.endsWith(`.${site}`))) return null
+  if (!url.pathname.replace(/\/+$/, '')) return null
+  url.protocol = 'https:'
+  url.hash = ''
+  return url.href.length <= NEWS_SOCIAL_URL_MAX ? url.href : null
+}
+
+const socialLinkSchema = z.object({ on: z.boolean(), url: z.string().max(NEWS_SOCIAL_URL_MAX + 100) }).strict()
+const pageSettingsSchema = z.object({
+  copyLink: z.boolean(),
+  social: z.object({ facebook: socialLinkSchema, linkedin: socialLinkSchema, youtube: socialLinkSchema, zalo: socialLinkSchema }).strict(),
 }).strict()
 
-export function normalizeNewsShareSettingsInput(value: unknown): NewsShareSettings {
-  const parsed = shareSettingsSchema.safeParse(value)
+export function normalizeNewsPageSettingsInput(value: unknown): NewsPageSettings {
+  const parsed = pageSettingsSchema.safeParse(value)
   if (!parsed.success) throw invalidInput(parsed.error, 'invalid_news_settings', 'Cài đặt Tin tức không hợp lệ.')
-  return parsed.data.share
+  const social = {} as NewsPageSettings['social']
+  for (const network of NEWS_SOCIAL_NETWORKS) {
+    const { example, label } = SOCIAL_SITES[network]
+    const url = normalizeNewsSocialUrl(network, parsed.data.social[network].url)
+    if (url === null) {
+      throw new HttpError(422, 'invalid_news_social_url', `Link ${label} chưa đúng. Hãy dán link trang ${label} của CWI, ví dụ ${example}`, { network })
+    }
+    if (parsed.data.social[network].on && !url) {
+      throw new HttpError(422, 'news_social_url_required', `Muốn hiện icon ${label} thì cần dán link trang ${label} của CWI.`, { network })
+    }
+    social[network] = { on: parsed.data.social[network].on, url }
+  }
+  return { copyLink: parsed.data.copyLink, social }
+}
+
+// What a post page gets: the networks to show (in this order) and the copy-link switch.
+export function publicNewsPageIcons(settings: NewsPageSettings) {
+  return {
+    copyLink: settings.copyLink,
+    social: NEWS_SOCIAL_NETWORKS.filter((network) => settings.social[network].on && settings.social[network].url)
+      .map((network) => ({ network, url: settings.social[network].url })),
+  }
 }

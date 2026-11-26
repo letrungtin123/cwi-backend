@@ -12,7 +12,7 @@ import { ReportAssetStorageError, type ReportAssetStorage } from '../reports/rep
 import { parseImageUpload, removeImageUpload } from '../surveyQuarters/surveyQuarterImageUpload.js'
 import { newsImageSrc } from './newsContent.js'
 import { DEFAULT_NEWS_AUTHOR, type NewsPost, type PgNewsRepository } from './newsRepository.js'
-import { newsSlugPattern, normalizeNewsCategoryInput, normalizeNewsPostInput, normalizeNewsShareSettingsInput, NEWS_POST_STATUSES, type NewsLanguage, type NewsPostStatus } from './newsValidation.js'
+import { newsSlugPattern, normalizeNewsCategoryInput, normalizeNewsPageSettingsInput, normalizeNewsPostInput, NEWS_POST_STATUSES, publicNewsPageIcons, type NewsLanguage, type NewsPostStatus } from './newsValidation.js'
 
 const SITE_NAME = 'CEO Workforce Index'
 // Lists and posts change rarely; a minute of browser cache keeps ads traffic cheap while an
@@ -219,9 +219,9 @@ export function createNewsPublicRouter(repository: PgNewsRepository, imageStorag
         res.json({ data: { redirectTo: found.redirectTo } })
         return
       }
-      // The page shows only the share buttons switched on in "Tin tức" -> "Cài đặt".
-      const { share } = await repository.getSettings()
-      res.json({ data: { post: toPublicPost(found.post), related: found.related, share } })
+      // The icons beside the post: CWI's pages and the copy-link icon ("Tin tức" -> "Cài đặt").
+      const icons = publicNewsPageIcons(await repository.getSettings())
+      res.json({ data: { post: toPublicPost(found.post), related: found.related, ...icons } })
     } catch (error) { next(error) }
   })
 
@@ -381,7 +381,7 @@ export function createNewsAdminRouter(repository: PgNewsRepository, imageStorage
   router.put('/settings', async (req, res, next) => {
     try {
       const actor = requireEditor(req)
-      res.json({ data: await repository.saveSettings(normalizeNewsShareSettingsInput(req.body), actor) })
+      res.json({ data: await repository.saveSettings(normalizeNewsPageSettingsInput(req.body), actor) })
     } catch (error) { next(error) }
   })
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { newsDocHasContent, newsDocImageIds, newsReadingMinutes, normalizeLinkHref, normalizeNewsDoc, youtubeVideoId } from '../src/modules/news/newsContent.js'
 import { missingForPublish } from '../src/modules/news/newsRepository.js'
-import { isValidPostSlug, normalizeNewsPostInput, normalizeNewsShareSettingsInput, slugify } from '../src/modules/news/newsValidation.js'
+import { isValidPostSlug, normalizeNewsPageSettingsInput, normalizeNewsPostInput, normalizeNewsSocialUrl, publicNewsPageIcons, slugify } from '../src/modules/news/newsValidation.js'
 
 const imageId = '3f2b8c1e-9a4d-4c6b-8e2f-1a2b3c4d5e6f'
 
@@ -142,12 +142,52 @@ describe('news links and post input', () => {
 })
 
 describe('news settings input', () => {
-  it('takes the four share buttons as on/off and nothing else', () => {
-    const share = { copyLink: true, facebook: false, linkedin: true, native: false }
-    expect(normalizeNewsShareSettingsInput({ share })).toEqual(share)
-    expect(errorOf(() => normalizeNewsShareSettingsInput({ share: { ...share, zalo: true } }))).toMatchObject({ code: 'invalid_news_settings', statusCode: 400 })
-    expect(errorOf(() => normalizeNewsShareSettingsInput({ share: { ...share, facebook: 'yes' } }))).toMatchObject({ code: 'invalid_news_settings', statusCode: 400 })
-    expect(errorOf(() => normalizeNewsShareSettingsInput({ share: { facebook: true } }))).toMatchObject({ code: 'invalid_news_settings', statusCode: 400 })
-    expect(errorOf(() => normalizeNewsShareSettingsInput(null))).toMatchObject({ code: 'invalid_news_settings', statusCode: 400 })
+  const none = { on: false, url: '' }
+  const settings = (social: Record<string, unknown> = {}, copyLink = true) => ({
+    copyLink,
+    social: { facebook: none, linkedin: none, youtube: none, zalo: none, ...social },
+  })
+
+  it('takes a page link per network, an on/off switch each and the copy-link switch', () => {
+    expect(normalizeNewsPageSettingsInput(settings({ facebook: { on: true, url: ' facebook.com/cwi.vn ' } }, false))).toEqual({
+      copyLink: false,
+      social: { facebook: { on: true, url: 'https://facebook.com/cwi.vn' }, linkedin: none, youtube: none, zalo: none },
+    })
+    // A link can stay saved while its icon is hidden.
+    expect(normalizeNewsPageSettingsInput(settings({ youtube: { on: false, url: 'http://www.youtube.com/@cwi#top' } })).social.youtube)
+      .toEqual({ on: false, url: 'https://www.youtube.com/@cwi' })
+    expect(errorOf(() => normalizeNewsPageSettingsInput({ ...settings(), share: {} }))).toMatchObject({ code: 'invalid_news_settings', statusCode: 400 })
+    expect(errorOf(() => normalizeNewsPageSettingsInput(settings({ tiktok: none })))).toMatchObject({ code: 'invalid_news_settings', statusCode: 400 })
+    expect(errorOf(() => normalizeNewsPageSettingsInput(null))).toMatchObject({ code: 'invalid_news_settings', statusCode: 400 })
+  })
+
+  it('refuses a link to another site, a home page alone, and an icon switched on without a link', () => {
+    expect(errorOf(() => normalizeNewsPageSettingsInput(settings({ facebook: { on: true, url: 'https://www.linkedin.com/company/cwi' } }))))
+      .toMatchObject({ code: 'invalid_news_social_url', statusCode: 422 })
+    expect(errorOf(() => normalizeNewsPageSettingsInput(settings({ linkedin: { on: false, url: 'https://evil-linkedin.com/company/cwi' } }))))
+      .toMatchObject({ code: 'invalid_news_social_url', statusCode: 422 })
+    expect(errorOf(() => normalizeNewsPageSettingsInput(settings({ zalo: { on: true, url: 'javascript:alert(1)//zalo.me/1' } }))))
+      .toMatchObject({ code: 'invalid_news_social_url', statusCode: 422 })
+    expect(errorOf(() => normalizeNewsPageSettingsInput(settings({ youtube: { on: true, url: 'https://www.youtube.com/' } }))))
+      .toMatchObject({ code: 'invalid_news_social_url', statusCode: 422 })
+    expect(errorOf(() => normalizeNewsPageSettingsInput(settings({ zalo: { on: true, url: '' } }))))
+      .toMatchObject({ code: 'news_social_url_required', statusCode: 422 })
+  })
+
+  it('accepts the usual forms of each network and gives the page only the icons switched on', () => {
+    expect(normalizeNewsSocialUrl('facebook', 'https://m.facebook.com/profile.php?id=123')).toBe('https://m.facebook.com/profile.php?id=123')
+    expect(normalizeNewsSocialUrl('linkedin', 'vn.linkedin.com/company/cwi/')).toBe('https://vn.linkedin.com/company/cwi/')
+    expect(normalizeNewsSocialUrl('youtube', 'https://youtu.be/abc')).toBe('https://youtu.be/abc')
+    expect(normalizeNewsSocialUrl('zalo', 'https://oa.zalo.me/home/123')).toBe('https://oa.zalo.me/home/123')
+    expect(normalizeNewsSocialUrl('zalo', 'https://user:pw@zalo.me/123')).toBeNull()
+    const page = normalizeNewsPageSettingsInput(settings({
+      facebook: { on: true, url: 'facebook.com/cwi' },
+      linkedin: { on: false, url: 'linkedin.com/company/cwi' },
+      zalo: { on: true, url: 'zalo.me/123' },
+    }))
+    expect(publicNewsPageIcons(page)).toEqual({
+      copyLink: true,
+      social: [{ network: 'facebook', url: 'https://facebook.com/cwi' }, { network: 'zalo', url: 'https://zalo.me/123' }],
+    })
   })
 })

@@ -3,7 +3,7 @@ import type { AuditActor } from '../../src/modules/audit/adminAuditLog.js'
 import type { AdminUser } from '../../src/modules/auth/authTypes.js'
 import { PgNewsRepository } from '../../src/modules/news/newsRepository.js'
 import { newsPageMeta } from '../../src/modules/news/newsRoutes.js'
-import { normalizeNewsCategoryInput, normalizeNewsPostInput } from '../../src/modules/news/newsValidation.js'
+import { normalizeNewsCategoryInput, normalizeNewsPageSettingsInput, normalizeNewsPostInput } from '../../src/modules/news/newsValidation.js'
 import { databaseReachable, openRollbackDb, type RollbackDb } from './rollbackDb.js'
 
 // News ("Tin tức") against the real local schema. Every write is rolled back.
@@ -143,21 +143,28 @@ describe.skipIf(!reachable)('news on the local database (rolled back)', () => {
     expect(history.map((entry) => entry.action).sort()).toEqual(['news_post.create', 'news_post.update'])
   })
 
-  it('shows every share button until settings are saved, then keeps the choice with its history', async () => {
+  it('starts with only the copy-link icon, then keeps the page links and switches with their history', async () => {
     await db.pool.query('DELETE FROM public.cwi_news_settings')
-    expect(await news.getSettings()).toEqual({ share: { copyLink: true, facebook: true, linkedin: true, native: true }, updatedAt: null, updatedByEmail: null })
-    const off = { copyLink: true, facebook: false, linkedin: false, native: true }
-    const saved = await news.saveSettings(off, actor)
-    expect(saved.share).toEqual(off)
+    const none = { on: false, url: '' }
+    const start = { copyLink: true, social: { facebook: none, linkedin: none, youtube: none, zalo: none } }
+    expect(await news.getSettings()).toEqual({ ...start, updatedAt: null, updatedByEmail: null })
+    const withFacebook = normalizeNewsPageSettingsInput({ ...start, social: { ...start.social, facebook: { on: true, url: 'facebook.com/cwi' } } })
+    const saved = await news.saveSettings(withFacebook, actor)
+    expect(saved).toMatchObject({ copyLink: true, social: { facebook: { on: true, url: 'https://facebook.com/cwi' }, zalo: none } })
     expect(saved.updatedByEmail).toBe(actor.user.email)
-    const again = await news.saveSettings({ ...off, copyLink: false }, actor)
-    expect((await news.getSettings()).share).toEqual({ ...off, copyLink: false })
+    const hidden = { copyLink: false, social: { ...withFacebook.social, facebook: { on: false, url: 'https://facebook.com/cwi' } } }
+    const again = await news.saveSettings(hidden, actor)
+    expect(await news.getSettings()).toMatchObject(hidden)
     expect(again.updatedAt).not.toBeNull()
     const audit = await db.pool.query<{ metadata: { after: unknown; before: unknown } }>(
       `SELECT metadata FROM public.cwi_admin_audit_logs WHERE target_type = 'news_settings' AND action = 'news_settings.update' AND created_at = now()`,
     )
     expect(audit.rows).toHaveLength(2)
-    expect(audit.rows.map((row) => row.metadata.before)).toContainEqual({ copyLink: true, facebook: true, linkedin: true, native: true })
-    expect(audit.rows.map((row) => row.metadata.after)).toContainEqual({ ...off, copyLink: false })
+    expect(audit.rows.map((row) => row.metadata.before)).toContainEqual(start)
+    expect(audit.rows.map((row) => row.metadata.after)).toContainEqual(hidden)
+    // The database itself refuses an icon switched on without a link.
+    await db.pool.query('BEGIN')
+    expect(await rejection(db.pool.query(`UPDATE public.cwi_news_settings SET social_zalo_on = true WHERE id`))).toContain('23514')
+    await db.pool.query('ROLLBACK')
   })
 })

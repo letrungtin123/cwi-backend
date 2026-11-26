@@ -3,7 +3,7 @@ import { withTransaction } from '../../db/transaction.js'
 import { HttpError } from '../../http/errors.js'
 import { listAdminAudit, writeAdminAudit, type AuditActor, type AuditEntry } from '../audit/adminAuditLog.js'
 import { EMPTY_NEWS_DOC, newsDocHasContent, newsDocImageIds, newsImageSrc, newsReadingMinutes, type NewsDoc } from './newsContent.js'
-import { DEFAULT_NEWS_SHARE_SETTINGS, slugify, type Bilingual, type NewsCategoryInput, type NewsPostInput, type NewsPostStatus, type NewsShareSettings } from './newsValidation.js'
+import { DEFAULT_NEWS_PAGE_SETTINGS, NEWS_SOCIAL_NETWORKS, slugify, type Bilingual, type NewsCategoryInput, type NewsPageSettings, type NewsPostInput, type NewsPostStatus, type NewsSocialNetwork } from './newsValidation.js'
 
 export const NEWS_POST_AUDIT_TARGET = 'news_post'
 export const NEWS_CATEGORY_AUDIT_TARGET = 'news_category'
@@ -33,31 +33,29 @@ export type NewsCategory = {
   updatedByEmail: string | null
 }
 
-export type NewsSettings = {
-  share: NewsShareSettings
+export type NewsSettings = NewsPageSettings & {
   updatedAt: string | null
   updatedByEmail: string | null
 }
 
-type SettingsRow = {
-  share_copy_link: boolean
-  share_facebook: boolean
-  share_linkedin: boolean
-  share_native: boolean
-  updated_at: Date
-  updated_by_email: string | null
+type SettingsRow = { share_copy_link: boolean; updated_at: Date; updated_by_email: string | null }
+  & Record<`social_${NewsSocialNetwork}_on`, boolean>
+  & Record<`social_${NewsSocialNetwork}_url`, string>
+
+function pageSettings(row: SettingsRow): NewsPageSettings {
+  const social = {} as NewsPageSettings['social']
+  for (const network of NEWS_SOCIAL_NETWORKS) social[network] = { on: row[`social_${network}_on`], url: row[`social_${network}_url`] }
+  return { copyLink: row.share_copy_link, social }
 }
 
 function mapSettings(row: SettingsRow | undefined): NewsSettings {
-  if (!row) return { share: { ...DEFAULT_NEWS_SHARE_SETTINGS }, updatedAt: null, updatedByEmail: null }
-  return {
-    share: { copyLink: row.share_copy_link, facebook: row.share_facebook, linkedin: row.share_linkedin, native: row.share_native },
-    updatedAt: row.updated_at.toISOString(),
-    updatedByEmail: row.updated_by_email,
-  }
+  if (!row) return { ...structuredClone(DEFAULT_NEWS_PAGE_SETTINGS), updatedAt: null, updatedByEmail: null }
+  return { ...pageSettings(row), updatedAt: row.updated_at.toISOString(), updatedByEmail: row.updated_by_email }
 }
 
-const settingsSelect = 'SELECT share_facebook, share_linkedin, share_copy_link, share_native, updated_at, updated_by_email FROM public.cwi_news_settings WHERE id'
+const socialColumns = NEWS_SOCIAL_NETWORKS.flatMap((network) => [`social_${network}_url`, `social_${network}_on`])
+const settingsColumns = ['share_copy_link', ...socialColumns, 'updated_at', 'updated_by_email'].join(', ')
+const settingsSelect = `SELECT ${settingsColumns} FROM public.cwi_news_settings WHERE id`
 
 export type NewsPost = {
   author: Bilingual
@@ -754,27 +752,32 @@ export class PgNewsRepository {
 
   // ---- Settings ----------------------------------------------------------------------
 
-  // One row; without it every share button is shown (the page as it was before settings).
+  // One row; without it no network has a link yet and the copy-link icon is shown.
   async getSettings(db: Queryable = this.pool): Promise<NewsSettings> {
     const result = await db.query<SettingsRow>(settingsSelect)
     return mapSettings(result.rows[0])
   }
 
-  async saveSettings(share: NewsShareSettings, actor: AuditActor): Promise<NewsSettings> {
+  async saveSettings(input: NewsPageSettings, actor: AuditActor): Promise<NewsSettings> {
     return withTransaction(this.pool, async (client) => {
       const before = await this.getSettings(client)
+      const columns = ['share_copy_link', ...socialColumns, 'updated_by_admin_id', 'updated_by_email']
+      const values = [
+        input.copyLink,
+        ...NEWS_SOCIAL_NETWORKS.flatMap((network) => [input.social[network].url, input.social[network].on]),
+        actor.user.id,
+        actor.user.email,
+      ]
       const saved = await client.query<SettingsRow>(
-        `INSERT INTO public.cwi_news_settings AS s (id, share_facebook, share_linkedin, share_copy_link, share_native, updated_by_admin_id, updated_by_email)
-        VALUES (true, $1, $2, $3, $4, $5, $6)
-        ON CONFLICT (id) DO UPDATE SET share_facebook = EXCLUDED.share_facebook, share_linkedin = EXCLUDED.share_linkedin,
-          share_copy_link = EXCLUDED.share_copy_link, share_native = EXCLUDED.share_native,
-          updated_by_admin_id = EXCLUDED.updated_by_admin_id, updated_by_email = EXCLUDED.updated_by_email
-        RETURNING share_facebook, share_linkedin, share_copy_link, share_native, updated_at, updated_by_email`,
-        [share.facebook, share.linkedin, share.copyLink, share.native, actor.user.id, actor.user.email],
+        `INSERT INTO public.cwi_news_settings AS s (id, ${columns.join(', ')})
+        VALUES (true, ${values.map((_, index) => `$${index + 1}`).join(', ')})
+        ON CONFLICT (id) DO UPDATE SET ${columns.map((column) => `${column} = EXCLUDED.${column}`).join(', ')}
+        RETURNING ${settingsColumns}`,
+        values,
       )
       await writeAdminAudit(client, actor, {
         action: 'news_settings.update',
-        metadata: { after: share, before: before.share },
+        metadata: { after: input, before: { copyLink: before.copyLink, social: before.social } },
         targetId: null,
         targetType: NEWS_SETTINGS_AUDIT_TARGET,
       })
