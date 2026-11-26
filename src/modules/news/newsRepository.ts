@@ -3,10 +3,11 @@ import { withTransaction } from '../../db/transaction.js'
 import { HttpError } from '../../http/errors.js'
 import { listAdminAudit, writeAdminAudit, type AuditActor, type AuditEntry } from '../audit/adminAuditLog.js'
 import { EMPTY_NEWS_DOC, newsDocHasContent, newsDocImageIds, newsImageSrc, newsReadingMinutes, type NewsDoc } from './newsContent.js'
-import { slugify, type Bilingual, type NewsCategoryInput, type NewsPostInput, type NewsPostStatus } from './newsValidation.js'
+import { DEFAULT_NEWS_SHARE_SETTINGS, slugify, type Bilingual, type NewsCategoryInput, type NewsPostInput, type NewsPostStatus, type NewsShareSettings } from './newsValidation.js'
 
 export const NEWS_POST_AUDIT_TARGET = 'news_post'
 export const NEWS_CATEGORY_AUDIT_TARGET = 'news_category'
+export const NEWS_SETTINGS_AUDIT_TARGET = 'news_settings'
 
 // Shown when a post names no author.
 export const DEFAULT_NEWS_AUTHOR: Bilingual = { en: 'CWI Editorial Team', vi: 'Ban biên tập CWI' }
@@ -31,6 +32,32 @@ export type NewsCategory = {
   updatedAt: string
   updatedByEmail: string | null
 }
+
+export type NewsSettings = {
+  share: NewsShareSettings
+  updatedAt: string | null
+  updatedByEmail: string | null
+}
+
+type SettingsRow = {
+  share_copy_link: boolean
+  share_facebook: boolean
+  share_linkedin: boolean
+  share_native: boolean
+  updated_at: Date
+  updated_by_email: string | null
+}
+
+function mapSettings(row: SettingsRow | undefined): NewsSettings {
+  if (!row) return { share: { ...DEFAULT_NEWS_SHARE_SETTINGS }, updatedAt: null, updatedByEmail: null }
+  return {
+    share: { copyLink: row.share_copy_link, facebook: row.share_facebook, linkedin: row.share_linkedin, native: row.share_native },
+    updatedAt: row.updated_at.toISOString(),
+    updatedByEmail: row.updated_by_email,
+  }
+}
+
+const settingsSelect = 'SELECT share_facebook, share_linkedin, share_copy_link, share_native, updated_at, updated_by_email FROM public.cwi_news_settings WHERE id'
 
 export type NewsPost = {
   author: Bilingual
@@ -723,6 +750,36 @@ export class PgNewsRepository {
       [ORPHAN_IMAGE_HOURS, limit],
     )
     return removed.rows.map((row) => row.storage_path)
+  }
+
+  // ---- Settings ----------------------------------------------------------------------
+
+  // One row; without it every share button is shown (the page as it was before settings).
+  async getSettings(db: Queryable = this.pool): Promise<NewsSettings> {
+    const result = await db.query<SettingsRow>(settingsSelect)
+    return mapSettings(result.rows[0])
+  }
+
+  async saveSettings(share: NewsShareSettings, actor: AuditActor): Promise<NewsSettings> {
+    return withTransaction(this.pool, async (client) => {
+      const before = await this.getSettings(client)
+      const saved = await client.query<SettingsRow>(
+        `INSERT INTO public.cwi_news_settings AS s (id, share_facebook, share_linkedin, share_copy_link, share_native, updated_by_admin_id, updated_by_email)
+        VALUES (true, $1, $2, $3, $4, $5, $6)
+        ON CONFLICT (id) DO UPDATE SET share_facebook = EXCLUDED.share_facebook, share_linkedin = EXCLUDED.share_linkedin,
+          share_copy_link = EXCLUDED.share_copy_link, share_native = EXCLUDED.share_native,
+          updated_by_admin_id = EXCLUDED.updated_by_admin_id, updated_by_email = EXCLUDED.updated_by_email
+        RETURNING share_facebook, share_linkedin, share_copy_link, share_native, updated_at, updated_by_email`,
+        [share.facebook, share.linkedin, share.copyLink, share.native, actor.user.id, actor.user.email],
+      )
+      await writeAdminAudit(client, actor, {
+        action: 'news_settings.update',
+        metadata: { after: share, before: before.share },
+        targetId: null,
+        targetType: NEWS_SETTINGS_AUDIT_TARGET,
+      })
+      return mapSettings(saved.rows[0])
+    })
   }
 
   // ---- Public pages ------------------------------------------------------------------

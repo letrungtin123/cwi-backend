@@ -12,7 +12,7 @@ import { ReportAssetStorageError, type ReportAssetStorage } from '../reports/rep
 import { parseImageUpload, removeImageUpload } from '../surveyQuarters/surveyQuarterImageUpload.js'
 import { newsImageSrc } from './newsContent.js'
 import { DEFAULT_NEWS_AUTHOR, type NewsPost, type PgNewsRepository } from './newsRepository.js'
-import { newsSlugPattern, normalizeNewsCategoryInput, normalizeNewsPostInput, NEWS_POST_STATUSES, type NewsLanguage, type NewsPostStatus } from './newsValidation.js'
+import { newsSlugPattern, normalizeNewsCategoryInput, normalizeNewsPostInput, normalizeNewsShareSettingsInput, NEWS_POST_STATUSES, type NewsLanguage, type NewsPostStatus } from './newsValidation.js'
 
 const SITE_NAME = 'CEO Workforce Index'
 // Lists and posts change rarely; a minute of browser cache keeps ads traffic cheap while an
@@ -219,7 +219,9 @@ export function createNewsPublicRouter(repository: PgNewsRepository, imageStorag
         res.json({ data: { redirectTo: found.redirectTo } })
         return
       }
-      res.json({ data: { post: toPublicPost(found.post), related: found.related } })
+      // The page shows only the share buttons switched on in "Tin tức" -> "Cài đặt".
+      const { share } = await repository.getSettings()
+      res.json({ data: { post: toPublicPost(found.post), related: found.related, share } })
     } catch (error) { next(error) }
   })
 
@@ -366,6 +368,20 @@ export function createNewsAdminRouter(repository: PgNewsRepository, imageStorage
     try {
       noStore(res)
       res.json({ data: { items: await repository.postHistory(parseId(req.params.id, 'post')) } })
+    } catch (error) { next(error) }
+  })
+
+  router.get('/settings', async (_req, res, next) => {
+    try {
+      noStore(res)
+      res.json({ data: await repository.getSettings() })
+    } catch (error) { next(error) }
+  })
+
+  router.put('/settings', async (req, res, next) => {
+    try {
+      const actor = requireEditor(req)
+      res.json({ data: await repository.saveSettings(normalizeNewsShareSettingsInput(req.body), actor) })
     } catch (error) { next(error) }
   })
 

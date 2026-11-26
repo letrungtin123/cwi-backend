@@ -171,3 +171,19 @@ export function normalizeNewsPostInput(value: unknown): NewsPostInput {
 export function newsLanguageLabel(language: NewsLanguage) {
   return languageLabels[language]
 }
+
+// "Tin tức" -> "Cài đặt": which share buttons every post page shows.
+export const NEWS_SHARE_BUTTONS = ['facebook', 'linkedin', 'copyLink', 'native'] as const
+export type NewsShareButton = (typeof NEWS_SHARE_BUTTONS)[number]
+export type NewsShareSettings = Record<NewsShareButton, boolean>
+export const DEFAULT_NEWS_SHARE_SETTINGS: NewsShareSettings = { copyLink: true, facebook: true, linkedin: true, native: true }
+
+const shareSettingsSchema = z.object({
+  share: z.object({ copyLink: z.boolean(), facebook: z.boolean(), linkedin: z.boolean(), native: z.boolean() }).strict(),
+}).strict()
+
+export function normalizeNewsShareSettingsInput(value: unknown): NewsShareSettings {
+  const parsed = shareSettingsSchema.safeParse(value)
+  if (!parsed.success) throw invalidInput(parsed.error, 'invalid_news_settings', 'Cài đặt Tin tức không hợp lệ.')
+  return parsed.data.share
+}

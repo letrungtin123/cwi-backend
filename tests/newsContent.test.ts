@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { newsDocHasContent, newsDocImageIds, newsReadingMinutes, normalizeLinkHref, normalizeNewsDoc, youtubeVideoId } from '../src/modules/news/newsContent.js'
 import { missingForPublish } from '../src/modules/news/newsRepository.js'
-import { isValidPostSlug, normalizeNewsPostInput, slugify } from '../src/modules/news/newsValidation.js'
+import { isValidPostSlug, normalizeNewsPostInput, normalizeNewsShareSettingsInput, slugify } from '../src/modules/news/newsValidation.js'
 
 const imageId = '3f2b8c1e-9a4d-4c6b-8e2f-1a2b3c4d5e6f'
 
@@ -138,5 +138,16 @@ describe('news links and post input', () => {
     expect(errorOf(() => normalizeNewsPostInput({ ...base, slug: 'chuyen-muc' }))).toMatchObject({ code: 'invalid_news_post_slug', statusCode: 422 })
     expect(errorOf(() => normalizeNewsPostInput({ ...base, source: { name: 'X', url: 'javascript:alert(1)' } }))).toMatchObject({ code: 'invalid_news_source_url', statusCode: 422 })
     expect(errorOf(() => normalizeNewsPostInput({ ...base, extra: true }))).toMatchObject({ code: 'invalid_news_post', statusCode: 400 })
+  })
+})
+
+describe('news settings input', () => {
+  it('takes the four share buttons as on/off and nothing else', () => {
+    const share = { copyLink: true, facebook: false, linkedin: true, native: false }
+    expect(normalizeNewsShareSettingsInput({ share })).toEqual(share)
+    expect(errorOf(() => normalizeNewsShareSettingsInput({ share: { ...share, zalo: true } }))).toMatchObject({ code: 'invalid_news_settings', statusCode: 400 })
+    expect(errorOf(() => normalizeNewsShareSettingsInput({ share: { ...share, facebook: 'yes' } }))).toMatchObject({ code: 'invalid_news_settings', statusCode: 400 })
+    expect(errorOf(() => normalizeNewsShareSettingsInput({ share: { facebook: true } }))).toMatchObject({ code: 'invalid_news_settings', statusCode: 400 })
+    expect(errorOf(() => normalizeNewsShareSettingsInput(null))).toMatchObject({ code: 'invalid_news_settings', statusCode: 400 })
   })
 })

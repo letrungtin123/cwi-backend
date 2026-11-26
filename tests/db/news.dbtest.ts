@@ -142,4 +142,22 @@ describe.skipIf(!reachable)('news on the local database (rolled back)', () => {
     // One test transaction gives every row the same time, so the order is not fixed here.
     expect(history.map((entry) => entry.action).sort()).toEqual(['news_post.create', 'news_post.update'])
   })
+
+  it('shows every share button until settings are saved, then keeps the choice with its history', async () => {
+    await db.pool.query('DELETE FROM public.cwi_news_settings')
+    expect(await news.getSettings()).toEqual({ share: { copyLink: true, facebook: true, linkedin: true, native: true }, updatedAt: null, updatedByEmail: null })
+    const off = { copyLink: true, facebook: false, linkedin: false, native: true }
+    const saved = await news.saveSettings(off, actor)
+    expect(saved.share).toEqual(off)
+    expect(saved.updatedByEmail).toBe(actor.user.email)
+    const again = await news.saveSettings({ ...off, copyLink: false }, actor)
+    expect((await news.getSettings()).share).toEqual({ ...off, copyLink: false })
+    expect(again.updatedAt).not.toBeNull()
+    const audit = await db.pool.query<{ metadata: { after: unknown; before: unknown } }>(
+      `SELECT metadata FROM public.cwi_admin_audit_logs WHERE target_type = 'news_settings' AND action = 'news_settings.update' AND created_at = now()`,
+    )
+    expect(audit.rows).toHaveLength(2)
+    expect(audit.rows.map((row) => row.metadata.before)).toContainEqual({ copyLink: true, facebook: true, linkedin: true, native: true })
+    expect(audit.rows.map((row) => row.metadata.after)).toContainEqual({ ...off, copyLink: false })
+  })
 })
