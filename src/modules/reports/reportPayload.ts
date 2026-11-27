@@ -20,6 +20,20 @@ export type AiReportPayload = {
   participant: {
     position: string
   }
+  // Follow-up answers; only the personalized report accepts them (the anonymous request
+  // refuses any extra field), and only present when there is at least one.
+  probing?: AiProbingAnswer[]
+}
+
+// cwi-ai V3ProbingAnswerItem. The ids follow what cwi-ai's own probing catalog returns for
+// a scale answer of 1 or 5 (p1.., extreme_q<idx>, q<idx>).
+export type AiProbingAnswer = {
+  answer_vi: string
+  origin: 'catalog'
+  probe_id: string
+  question_vi: string
+  related_question_ids: string[]
+  trigger_code: string
 }
 
 export type ReportJobCreateInput = {
@@ -58,6 +72,24 @@ function toAiAnswer(edition: SurveyEdition, answer: NormalizedAnswer): AiReportA
   return { answer: answer.answerForReport, idx: answer.idx, question }
 }
 
+// Answers arrive ordered by question, so p1 is the follow-up of the lowest question number.
+// Probing answers never change scores; cwi-ai uses them as material for the report text.
+function toAiProbing(answers: readonly NormalizedAnswer[]): AiProbingAnswer[] {
+  const probing: AiProbingAnswer[] = []
+  for (const answer of answers) {
+    if (!answer.followUp) continue
+    probing.push({
+      answer_vi: answer.followUp.answer,
+      origin: 'catalog',
+      probe_id: `p${probing.length + 1}`,
+      question_vi: answer.followUp.question,
+      related_question_ids: [`q${answer.idx}`],
+      trigger_code: `extreme_q${answer.idx}`,
+    })
+  }
+  return probing
+}
+
 function buildBasePayload(submission: NormalizedSurveySubmission): Omit<AiReportPayload, 'answers'> {
   return {
     cohort_consent: submission.privacyConsent === 'yes',
@@ -81,9 +113,11 @@ export function buildReportJobRequest(submission: NormalizedSurveySubmission): R
   const endpoint = `/v3/editions/${edition.aiEditionId}/reports/${reportType}`
   // The anonymous report accepts exactly the 18 Part 1 answers.
   const answers = reportType === 'personalized' ? submission.answers : submission.answers.filter((answer) => answer.part === 1)
+  const probing = reportType === 'personalized' ? toAiProbing(answers) : []
   const requestPayload: AiReportPayload = {
     ...buildBasePayload(submission),
     answers: answers.map((answer) => toAiAnswer(edition, answer)),
+    ...(probing.length ? { probing } : {}),
   }
 
   return {

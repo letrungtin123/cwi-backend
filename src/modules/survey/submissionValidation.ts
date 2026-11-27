@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { HttpError } from '../../http/errors.js'
 import {
+  FOLLOW_UP_ANSWER_MAX,
+  FOLLOW_UP_ANSWER_MIN,
   SURVEY_LANGUAGES,
   type SurveyLanguage,
   type SurveyQuestion,
@@ -39,11 +41,20 @@ export type NormalizedAnswer = {
   answerForReport: number | string
   answerText: string
   answerValue: unknown
+  // Follow-up question asked under a scale answer of 1 or 5, with the respondent's answer.
+  // Left out (not null) when there is none, so payloadHash stays what it was before
+  // follow-ups existed and a retry across the release is still recognised.
+  followUp?: SurveyFollowUpAnswer
   idx: number
   otherText: string | null
   part: 1 | 2
   questionText: string
   questionType: SurveyQuestionType
+}
+
+export type SurveyFollowUpAnswer = {
+  answer: string
+  question: string
 }
 
 export type NormalizedSurveySubmission = {
@@ -76,6 +87,9 @@ const idempotencyKeySchema = z
 const rawAnswerSchema = z
   .object({
     answer: z.union([z.number().int(), z.string().trim().min(1).max(2048)]),
+    // Answer to the follow-up question of a scale answer of 1 or 5; length is checked later
+    // so the respondent gets a clear message.
+    followUpAnswer: z.string().max(4000).optional(),
     idx: z.coerce.number().int().min(1).max(24),
     // CWI AI V3 accepts other_text of 2-500 characters; reject earlier so the
     // stored submission never produces a report job that is bound to fail.
@@ -146,7 +160,31 @@ function normalizePhone(value: string) {
   })
 }
 
-function normalizeLikertAnswer(question: SurveyQuestion, raw: RawAnswer): NormalizedAnswer {
+function normalizeFollowUp(edition: SurveyEdition, question: SurveyQuestion, value: number, raw: RawAnswer): SurveyFollowUpAnswer | null {
+  if (raw.followUpAnswer === undefined) return null
+
+  if (!edition.followUp || question.type !== 'likert' || (value !== 1 && value !== 5)) {
+    validationError('unexpected_follow_up', `Question ${question.idx} has no follow-up question.`, { idx: question.idx })
+  }
+
+  const answer = normalizeText(raw.followUpAnswer)
+  if (answer.length < FOLLOW_UP_ANSWER_MIN) {
+    validationError('follow_up_answer_too_short', `Câu hỏi phụ của câu ${question.idx} cần ít nhất ${FOLLOW_UP_ANSWER_MIN} ký tự.`, {
+      idx: question.idx,
+      min: FOLLOW_UP_ANSWER_MIN,
+    })
+  }
+  if (answer.length > FOLLOW_UP_ANSWER_MAX) {
+    validationError('follow_up_answer_too_long', `Câu hỏi phụ của câu ${question.idx} tối đa ${FOLLOW_UP_ANSWER_MAX} ký tự.`, {
+      idx: question.idx,
+      max: FOLLOW_UP_ANSWER_MAX,
+    })
+  }
+
+  return { answer, question: edition.followUp.question }
+}
+
+function normalizeLikertAnswer(edition: SurveyEdition, question: SurveyQuestion, raw: RawAnswer): NormalizedAnswer {
   const value = typeof raw.answer === 'number' ? raw.answer : Number(raw.answer)
 
   if (!Number.isInteger(value) || value < 1 || value > 5) {
@@ -155,10 +193,12 @@ function normalizeLikertAnswer(question: SurveyQuestion, raw: RawAnswer): Normal
     })
   }
 
+  const followUp = normalizeFollowUp(edition, question, value, raw)
   return {
     answerForReport: value,
     answerText: String(value),
     answerValue: value,
+    ...(followUp ? { followUp } : {}),
     idx: question.idx,
     otherText: null,
     part: question.part,
@@ -254,9 +294,23 @@ function normalizeAnswer(edition: SurveyEdition, raw: RawAnswer) {
     validationError('unknown_question', `Unknown question index ${raw.idx}.`, { idx: raw.idx })
   }
 
-  if (question.type === 'likert') return normalizeLikertAnswer(question, raw)
+  if (question.type === 'likert') return normalizeLikertAnswer(edition, question, raw)
+  if (raw.followUpAnswer !== undefined) {
+    validationError('unexpected_follow_up', `Question ${question.idx} has no follow-up question.`, { idx: question.idx })
+  }
   if (question.type === 'mcq') return normalizeMcqAnswer(question, raw, edition.otherOption)
   return normalizeUrlAnswer(question, raw)
+}
+
+// The survey asks the follow-up under the first FOLLOW_UP_MAX scale answers of 1 or 5 and
+// requires it, but a page opened before follow-ups existed sends none, so only the
+// upper limit is enforced here.
+function assertFollowUpCount(edition: SurveyEdition, answers: readonly NormalizedAnswer[]) {
+  const count = answers.filter((answer) => answer.followUp).length
+  const max = edition.followUp?.max ?? 0
+  if (count > max) {
+    validationError('too_many_follow_ups', `Chỉ được trả lời tối đa ${max} câu hỏi phụ.`, { count, max })
+  }
 }
 
 function normalizeRoundtable(raw: RawSubmission['roundtableRegistration']): RoundtableRegistration | null {
@@ -373,6 +427,7 @@ export function normalizeSurveySubmission(payload: unknown, headerIdempotencyKey
     }
     return answer
   })
+  assertFollowUpCount(edition, orderedAnswers)
 
   const scores = getSurveyScores(orderedAnswers)
   const normalizedRoundtableRegistration = normalizeRoundtable(raw.roundtableRegistration)

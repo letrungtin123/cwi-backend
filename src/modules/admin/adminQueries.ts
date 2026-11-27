@@ -40,6 +40,8 @@ export type AnswerRow = {
   submission_id: string
   answer_text: string
   answer_value: unknown
+  followup_answer: string | null
+  followup_question: string | null
   other_text: string | null
   part: number
   question_idx: number

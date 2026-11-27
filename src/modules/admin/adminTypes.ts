@@ -54,6 +54,8 @@ export type SubmissionDetail = SubmissionListItem & {
   answers: Array<{
     answerText: string
     answerValue: unknown
+    // Follow-up question asked under a scale answer of 1 or 5, with the respondent's answer.
+    followUp: { answer: string; question: string } | null
     idx: number
     otherText: string | null
     part: number

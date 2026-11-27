@@ -323,7 +323,12 @@ export class ExportWorkbookService {
       const primarySheet = createSheetWriter(workbook, job.dataset === 'submissions' ? 'Lượt gửi khảo sát' : `Đăng ký ${registrationLabel}`, primaryHeaders, primaryWidths)
       const answerSheet =
         job.dataset === 'submissions'
-          ? createSheetWriter(workbook, 'Câu trả lời', ['Quý khảo sát', 'Họ tên', 'Email', 'Phần', 'Số câu', 'Câu hỏi', 'Câu trả lời', 'Nội dung khác', 'Thời gian gửi'], [14, 24, 30, 10, 10, 70, 34, 34, 20])
+          ? createSheetWriter(
+              workbook,
+              'Câu trả lời',
+              ['Quý khảo sát', 'Họ tên', 'Email', 'Phần', 'Số câu', 'Câu hỏi', 'Câu trả lời', 'Nội dung khác', 'Câu hỏi phụ', 'Trả lời câu hỏi phụ', 'Thời gian gửi'],
+              [14, 24, 30, 10, 10, 70, 34, 34, 34, 60, 20],
+            )
           : null
       const linkedSheet =
         job.dataset !== 'submissions'
@@ -348,6 +353,8 @@ export class ExportWorkbookService {
               answer.question_text,
               answer.answer_text || answerValueToText(answer.answer_value),
               answer.other_text ?? '',
+              answer.followup_question ?? '',
+              answer.followup_answer ?? '',
               answer.submitted_at,
             ])
           }

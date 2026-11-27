@@ -10,6 +10,14 @@ export type SurveyLanguage = (typeof SURVEY_LANGUAGES)[number]
 
 export const OTHER_OPTION = 'Khác.'
 
+// Follow-up question ("câu hỏi phụ") asked under a scale answer of 1 or 5, for at most
+// FOLLOW_UP_MAX questions per submission. Same text as cwi-ai's 2026-q4 probing catalog
+// (/v3/editions/2026-q4/probing-questions); the answer goes to the personalized report.
+export const FOLLOW_UP_QUESTION = 'Tại sao Anh/Chị chọn câu trả lời này?'
+export const FOLLOW_UP_MAX = 2
+export const FOLLOW_UP_ANSWER_MIN = 10
+export const FOLLOW_UP_ANSWER_MAX = 1000
+
 export type SurveyQuestionType = 'likert' | 'mcq' | 'text'
 
 export type SurveyQuestion = {

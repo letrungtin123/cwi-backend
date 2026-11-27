@@ -66,7 +66,7 @@ function buildAnswerInsert(answers: readonly NormalizedAnswer[], submissionId: s
   for (const answer of answers) {
     const start = params.length + 1
     values.push(
-      `($${start}, $${start + 1}, $${start + 2}, $${start + 3}, $${start + 4}, $${start + 5}::jsonb, $${start + 6}, $${start + 7})`,
+      `($${start}, $${start + 1}, $${start + 2}, $${start + 3}, $${start + 4}, $${start + 5}::jsonb, $${start + 6}, $${start + 7}, $${start + 8}, $${start + 9})`,
     )
     params.push(
       submissionId,
@@ -77,6 +77,8 @@ function buildAnswerInsert(answers: readonly NormalizedAnswer[], submissionId: s
       JSON.stringify(answer.answerValue),
       answer.answerText,
       answer.otherText,
+      answer.followUp?.question ?? null,
+      answer.followUp?.answer ?? null,
     )
   }
 
@@ -215,7 +217,9 @@ export class PgSurveyRepository implements SurveyRepository {
           question_text,
           answer_value,
           answer_text,
-          other_text
+          other_text,
+          followup_question,
+          followup_answer
         )
         VALUES ${answerInsert.values.join(', ')}
         `,

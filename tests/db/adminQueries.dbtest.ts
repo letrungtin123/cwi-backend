@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { decodeCursor } from '../../src/http/cursor.js'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { PgAdminRepository, type ReportStatusFilter, type SubmissionListFilters } from '../../src/modules/admin/adminRepository.js'
+import { PgExportRepository } from '../../src/modules/exports/exportRepository.js'
 import { PgRoundtableRepository } from '../../src/modules/roundtable/roundtableRepository.js'
 import { normalizeRoundtableRegistration } from '../../src/modules/roundtable/roundtableValidation.js'
 import { normalizeSurveySubmission } from '../../src/modules/survey/submissionValidation.js'
@@ -102,6 +103,56 @@ describe.skipIf(!reachable)('admin queries on the local database (rolled back)',
 
     const filtered = await admin.listSubmissionsPage(baseFilters({ search: email, status: 'part1_only' }))
     expect(filtered.items).toHaveLength(0)
+  })
+
+  it('stores follow-up answers and shows them in the detail (in English for an English survey) and the export', async () => {
+    // surveyAnswers() answers 1 on question 1 and 5 on question 5.
+    const answers = surveyAnswers().map((answer) => {
+      if (answer.idx === 1) return { ...answer, followUpAnswer: 'Market changes faster than we can adapt.' }
+      if (answer.idx === 5) return { ...answer, followUpAnswer: 'Có người kế cận cho mọi vị trí chủ chốt.' }
+      return answer
+    })
+    const submission = normalizeSurveySubmission({
+      answers,
+      language: 'en',
+      participant: { companyName: 'Công ty Thử nghiệm', email, fullName: 'Người Thử Nghiệm', phone: '0901234567', position: 'CEO' },
+      privacyConsent: 'yes',
+      submissionStatus: 'full_private_report',
+      surveyVersion: SURVEY_VERSION,
+    }, `dbtest:${randomUUID()}`)
+    const created = await new PgSurveyRepository(db.pool).createSubmission(submission, meta, null)
+
+    const stored = await db.pool.query<{ followup_answer: string; followup_question: string; question_idx: number }>(
+      'SELECT question_idx, followup_question, followup_answer FROM public.cwi_survey_answers WHERE submission_id = $1 AND followup_question IS NOT NULL ORDER BY question_idx',
+      [created.id],
+    )
+    expect(stored.rows).toEqual([
+      { followup_answer: 'Market changes faster than we can adapt.', followup_question: 'Tại sao Anh/Chị chọn câu trả lời này?', question_idx: 1 },
+      { followup_answer: 'Có người kế cận cho mọi vị trí chủ chốt.', followup_question: 'Tại sao Anh/Chị chọn câu trả lời này?', question_idx: 5 },
+    ])
+
+    const detail = await admin.getSubmission(created.id)
+    expect(detail.answers.find((answer) => answer.idx === 1)?.followUp).toEqual({
+      answer: 'Market changes faster than we can adapt.',
+      question: 'Why did you choose this response?',
+    })
+    expect(detail.answers.filter((answer) => answer.followUp)).toHaveLength(2)
+
+    const exported = await new PgExportRepository(db.pool).listAnswerBatch([created.id])
+    expect(exported.filter((row) => row.followup_answer).map((row) => [row.question_idx, row.followup_question])).toEqual([
+      [1, 'Tại sao Anh/Chị chọn câu trả lời này?'],
+      [5, 'Tại sao Anh/Chị chọn câu trả lời này?'],
+    ])
+
+    // The database refuses a follow-up on an answer other than 1 or 5, or a half-filled one.
+    for (const [sql, params] of [
+      ['UPDATE public.cwi_survey_answers SET followup_question = $2, followup_answer = $3 WHERE submission_id = $1 AND question_idx = 2', [created.id, 'Câu hỏi phụ?', 'Trả lời câu hỏi phụ']],
+      ['UPDATE public.cwi_survey_answers SET followup_answer = NULL WHERE submission_id = $1 AND question_idx = 1', [created.id]],
+    ] as const) {
+      await db.pool.query('BEGIN')
+      await expect(db.pool.query(sql, [...params])).rejects.toMatchObject({ code: '23514' })
+      await db.pool.query('ROLLBACK')
+    }
   })
 
   it('runs every submission filter the dashboard can send', async () => {

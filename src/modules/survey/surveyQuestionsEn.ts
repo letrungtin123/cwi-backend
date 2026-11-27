@@ -129,6 +129,8 @@ export const SURVEY_TEXT_EN: Readonly<Record<string, string>> = {
   "Từ 5,000 - <10,000 tỷ VND": "5,000 – <10,000 billion VND",
   "Trên 10,000 tỷ VND": "Over 10,000 billion VND",
   "Website công ty": "Company website",
+  // Follow-up question under a scale answer of 1 or 5 (cwi-ai's English catalog text).
+  "Tại sao Anh/Chị chọn câu trả lời này?": "Why did you choose this response?",
 }
 
 // Falls back to the Vietnamese text, so an earlier question set still shows something readable.

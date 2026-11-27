@@ -1,4 +1,10 @@
-import { OTHER_OPTION as OTHER_OPTION_2026Q4, SURVEY_QUESTIONS as SURVEY_QUESTIONS_2026Q4, type SurveyQuestion } from './surveyQuestions.js'
+import {
+  FOLLOW_UP_MAX,
+  FOLLOW_UP_QUESTION,
+  OTHER_OPTION as OTHER_OPTION_2026Q4,
+  SURVEY_QUESTIONS as SURVEY_QUESTIONS_2026Q4,
+  type SurveyQuestion,
+} from './surveyQuestions.js'
 import {
   AI_OTHER_OPTION_2026Q3,
   AI_QUESTION_TEXT_2026Q3,
@@ -22,6 +28,9 @@ export type SurveyEdition = {
   // Question text cwi-ai expects where it differs from the text the survey shows.
   aiQuestionText: ReadonlyMap<number, string>
   allQuestionIdxs: readonly number[]
+  // Follow-up question under a scale answer of 1 or 5, or null when the quarter has none
+  // (cwi-ai's probing catalog of 2026-q3 asks nothing).
+  followUp: SurveyFollowUp | null
   // The "other" option as the survey shows and stores it.
   otherOption: string
   partOneQuestionIdxs: readonly number[]
@@ -31,6 +40,13 @@ export type SurveyEdition = {
   theme: { en: string; vi: string }
   // Stored in cwi_survey_submissions.survey_version, e.g. 2026Q4.
   version: string
+}
+
+export type SurveyFollowUp = {
+  // Most scale questions of one submission that get the follow-up.
+  max: number
+  // Vietnamese text, stored with the answer and sent to cwi-ai.
+  question: string
 }
 
 function defineEdition(input: Omit<SurveyEdition, 'aiEditionId' | 'allQuestionIdxs' | 'partOneQuestionIdxs' | 'questionByIdx'>): SurveyEdition {
@@ -50,6 +66,7 @@ export const SURVEY_EDITIONS: readonly SurveyEdition[] = [
   defineEdition({
     aiOtherOption: AI_OTHER_OPTION_2026Q3,
     aiQuestionText: AI_QUESTION_TEXT_2026Q3,
+    followUp: null,
     otherOption: OTHER_OPTION_2026Q3,
     questions: SURVEY_QUESTIONS_2026Q3,
     theme: { en: 'Leadership Capacity to Scale', vi: 'Năng lực lãnh đạo cho tăng trưởng' },
@@ -58,6 +75,7 @@ export const SURVEY_EDITIONS: readonly SurveyEdition[] = [
   defineEdition({
     aiOtherOption: OTHER_OPTION_2026Q4,
     aiQuestionText: new Map(),
+    followUp: { max: FOLLOW_UP_MAX, question: FOLLOW_UP_QUESTION },
     otherOption: OTHER_OPTION_2026Q4,
     questions: SURVEY_QUESTIONS_2026Q4,
     theme: { en: 'Workforce Plus for Future Readiness', vi: 'Hệ cộng lực sẵn sàng cho tương lai' },

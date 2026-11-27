@@ -4,15 +4,16 @@ import { SURVEY_EDITIONS } from '../src/modules/survey/surveyEditions.js'
 import { SURVEY_TEXT_EN } from '../src/modules/survey/surveyQuestionsEn.js'
 
 describe('English question set text', () => {
-  it('has an English text for every question, option and instruction of every edition, and nothing else', () => {
+  it('has an English text for every question, option, instruction and follow-up question of every edition, and nothing else', () => {
     const vietnamese = new Set(
-      SURVEY_EDITIONS.flatMap((edition) =>
-        (edition.questions as readonly SurveyQuestion[]).flatMap((question) => [
+      SURVEY_EDITIONS.flatMap((edition) => [
+        ...(edition.questions as readonly SurveyQuestion[]).flatMap((question) => [
           question.question,
           ...(question.options ?? []),
           ...(question.instruction ? [question.instruction] : []),
         ]),
-      ),
+        ...(edition.followUp ? [edition.followUp.question] : []),
+      ]),
     )
 
     expect([...vietnamese].filter((text) => !SURVEY_TEXT_EN[text])).toEqual([])

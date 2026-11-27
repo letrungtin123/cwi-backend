@@ -27,6 +27,8 @@ type AnswerExportRow = {
   answer_text: string
   answer_value: unknown
   email: string
+  followup_answer: string | null
+  followup_question: string | null
   full_name: string
   other_text: string | null
   part: number
@@ -295,6 +297,7 @@ export class PgExportRepository {
     const result = await this.pool.query<AnswerExportRow>(
       [
         'SELECT a.submission_id, a.question_idx, a.part, a.question_text, a.answer_text, a.answer_value, a.other_text,',
+        '       a.followup_question, a.followup_answer,',
         '       s.full_name, s.email, s.submitted_at, s.survey_version',
         'FROM public.cwi_survey_answers AS a',
         'JOIN public.cwi_survey_submissions AS s ON s.id = a.submission_id',

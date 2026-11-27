@@ -421,7 +421,8 @@ export class PgAdminRepository {
       ),
       this.pool.query<AnswerRow>(
         `
-        SELECT submission_id, question_idx, part, question_type, question_text, answer_value, answer_text, other_text
+        SELECT submission_id, question_idx, part, question_type, question_text, answer_value, answer_text, other_text,
+          followup_question, followup_answer
         FROM public.cwi_survey_answers
         WHERE submission_id = $1
         ORDER BY question_idx ASC
@@ -452,6 +453,9 @@ export class PgAdminRepository {
       answers: answersResult.rows.map((answer) => ({
         answerText: english && answer.question_type === 'mcq' ? surveyTextEn(answer.answer_text) : answer.answer_text,
         answerValue: answer.answer_value,
+        followUp: answer.followup_question && answer.followup_answer
+          ? { answer: answer.followup_answer, question: english ? surveyTextEn(answer.followup_question) : answer.followup_question }
+          : null,
         idx: answer.question_idx,
         otherText: answer.other_text,
         part: answer.part,

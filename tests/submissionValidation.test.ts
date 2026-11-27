@@ -339,6 +339,102 @@ describe('normalizeSurveySubmission', () => {
   })
 })
 
+// partOneAnswers() answers 1 on questions 1, 6, 11, 16 and 5 on questions 5, 10, 15.
+describe('follow-up questions on scale answers of 1 or 5', () => {
+  function withFollowUps(answers: ReturnType<typeof allAnswers>, followUps: Record<number, string>) {
+    return answers.map((answer) => (answer.idx in followUps ? { ...answer, followUpAnswer: followUps[answer.idx] } : answer))
+  }
+
+  function submit(followUps: Record<number, string>, overrides: Record<string, unknown> = {}) {
+    return normalizeSurveySubmission({
+      answers: withFollowUps(allAnswers(), followUps),
+      participant,
+      privacyConsent: 'yes',
+      submissionStatus: 'full_private_report',
+      surveyVersion,
+      ...overrides,
+    }, null)
+  }
+
+  it('keeps up to two follow-up answers with the Vietnamese question and sends them to the personalized report', () => {
+    const submission = submit({ 5: '  Đội ngũ   quản lý đã có người kế cận.  ', 1: 'Thị trường thay đổi quá nhanh với chúng tôi.' })
+
+    expect(submission.answers.find((answer) => answer.idx === 1)?.followUp).toEqual({
+      answer: 'Thị trường thay đổi quá nhanh với chúng tôi.',
+      question: 'Tại sao Anh/Chị chọn câu trả lời này?',
+    })
+    expect(submission.answers.find((answer) => answer.idx === 5)?.followUp?.answer).toBe('Đội ngũ quản lý đã có người kế cận.')
+    expect(submission.answers.filter((answer) => answer.followUp)).toHaveLength(2)
+
+    const request = buildReportJobRequest(submission)
+    expect(request.reportType).toBe('personalized')
+    expect(request.requestPayload.probing).toEqual([
+      {
+        answer_vi: 'Thị trường thay đổi quá nhanh với chúng tôi.',
+        origin: 'catalog',
+        probe_id: 'p1',
+        question_vi: 'Tại sao Anh/Chị chọn câu trả lời này?',
+        related_question_ids: ['q1'],
+        trigger_code: 'extreme_q1',
+      },
+      {
+        answer_vi: 'Đội ngũ quản lý đã có người kế cận.',
+        origin: 'catalog',
+        probe_id: 'p2',
+        question_vi: 'Tại sao Anh/Chị chọn câu trả lời này?',
+        related_question_ids: ['q5'],
+        trigger_code: 'extreme_q5',
+      },
+    ])
+    // Scores never depend on follow-up answers.
+    expect(submission.scores).toEqual(submit({}).scores)
+  })
+
+  it('stores follow-ups of anonymous reports but never sends them, since cwi-ai refuses the field there', () => {
+    const partOne = normalizeSurveySubmission({
+      answers: withFollowUps(partOneAnswers(), { 6: 'Văn hóa chưa khuyến khích hiệu suất cao.' }),
+      participant,
+      privacyConsent: 'not_applicable',
+      submissionStatus: 'part1_only',
+      surveyVersion,
+    }, null)
+    expect(partOne.answers.find((answer) => answer.idx === 6)?.followUp?.answer).toBe('Văn hóa chưa khuyến khích hiệu suất cao.')
+    expect(buildReportJobRequest(partOne).requestPayload).not.toHaveProperty('probing')
+
+    const refused = submit({ 6: 'Văn hóa chưa khuyến khích hiệu suất cao.' }, { privacyConsent: 'no', submissionStatus: 'part2_refused_privacy' })
+    expect(refused.answers.find((answer) => answer.idx === 6)?.followUp).toBeDefined()
+    expect(buildReportJobRequest(refused).reportType).toBe('anonymous')
+    expect(buildReportJobRequest(refused).requestPayload).not.toHaveProperty('probing')
+  })
+
+  it('leaves the follow-up out entirely when there is none, so older pages and retries are unchanged', () => {
+    const submission = submit({})
+    expect(submission.answers.some((answer) => 'followUp' in answer)).toBe(false)
+    expect(buildReportJobRequest(submission).requestPayload).not.toHaveProperty('probing')
+  })
+
+  it('refuses follow-ups that the survey never asks', () => {
+    // Question 2 was answered 2, question 17 is a multiple-choice question.
+    expectHttpErrorCode(() => submit({ 2: 'Một câu trả lời đủ dài cho câu phụ.' }), 'unexpected_follow_up')
+    expectHttpErrorCode(() => submit({ 17: 'Một câu trả lời đủ dài cho câu phụ.' }), 'unexpected_follow_up')
+    expectHttpErrorCode(() => submit({ 1: 'Câu một đủ dài.', 5: 'Câu năm đủ dài.', 6: 'Câu sáu đủ dài.' }), 'too_many_follow_ups')
+    // 2026Q3 has no follow-up question; its question 1 is a scale question too and is checked first.
+    expectHttpErrorCode(() => normalizeSurveySubmission({
+      answers: withFollowUps(partOneAnswers(), { 1: 'Một câu trả lời đủ dài cho câu phụ.' }),
+      participant,
+      privacyConsent: 'not_applicable',
+      submissionStatus: 'part1_only',
+      surveyVersion: '2026Q3',
+    }, null), 'unexpected_follow_up')
+  })
+
+  it('requires 10 to 1000 characters', () => {
+    expectHttpErrorCode(() => submit({ 1: '  quá   ngắn ' }), 'follow_up_answer_too_short')
+    expectHttpErrorCode(() => submit({ 1: 'a'.repeat(1001) }), 'follow_up_answer_too_long')
+    expect(submit({ 1: 'a'.repeat(1000) }).answers[0]?.followUp?.answer).toHaveLength(1000)
+  })
+})
+
 describe('normalizeRoundtableRegistration', () => {
   const roundtablePayload = {
     clientMeta: { path: '/survey' },
